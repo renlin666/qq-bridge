@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>功能插件 · QQ Bridge</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--card:#fff;--text:#172532;--line:#dbe2e8;--accent:#17645e}
+@media(prefers-color-scheme:dark){:root{--bg:#141a21;--card:#1c2530;--text:#e3edf5;--line:#384351;--accent:#83d9ca}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 system-ui,sans-serif}
+main{max-width:1040px;margin:auto;padding:40px 24px}a{color:var(--accent)}h1{font-size:32px;margin-bottom:8px}p{max-width:780px}
+#plugins{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start;gap:20px;margin-top:28px}
+article{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;min-width:0}
+h2{margin:0 0 4px;font-size:22px}.meta{opacity:.75;font-size:13px;overflow-wrap:anywhere}.error{color:#d95148;white-space:pre-wrap}
+label{display:block;margin:16px 0 5px}input:not([type=checkbox]),textarea{display:block;width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}textarea{min-height:84px;font-family:ui-monospace,monospace}
+button{font:inherit;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:inherit;padding:8px 16px;cursor:pointer;margin:18px 8px 0 0}button:disabled{opacity:.5;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.notice{padding:14px 18px;border-left:3px solid var(--accent);background:var(--card)}code{overflow-wrap:anywhere}
+@media(max-width:480px){main{padding:24px 16px}#plugins{grid-template-columns:1fr}article{padding:18px}}
+</style>
+</head>
+<body><main>
+<a id="back" href="/">← 返回控制台</a>
+<h1>功能插件</h1><p>独立管理 QQ Bridge 的功能扩展。停用立即阻止调用；启用或修改配置后，请重启桥接并重连现有 QQ MCP。</p>
+<p class="notice">插件与桥接共享本机进程，请只安装你信任的代码。新插件放入 <code>extensions-local/插件ID/</code>，并在配置中明确启用和授予能力。</p>
+<button id="refresh">刷新状态</button><p id="status" role="status" aria-live="polite">正在读取插件…</p><div id="plugins"></div>
+</main><script>
+const queryToken = new URLSearchParams(location.search).get('token');
+if (queryToken) { localStorage.setItem('consoleToken', queryToken); history.replaceState(null, '', '/extensions'); }
+const token = localStorage.getItem('consoleToken') || '';
+document.getElementById('back').href = '/?token=' + encodeURIComponent(token);
+async function api(url, body) {
+  const response = await fetch(url, { method: body ? 'POST' : 'GET', headers: { 'x-console-token': token, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(typeof data.error === 'string' ? data.error : '插件管理请求失败');
+  return data;
+}
+function element(tag, text, className) { const node = document.createElement(tag); if (text != null) node.textContent = text; if (className) node.className = className; return node; }
+async function load() {
+  const status = document.getElementById('status');
+  try {
+    const data = await api('/api/extensions');
+    const container = document.getElementById('plugins'); container.replaceChildren();
+    for (const plugin of data.plugins) {
+      const states = { active: '运行中', disabled: '已停用', failed: '加载失败', loading: '正在加载', discovered: '已发现' };
+      const card = element('article'); card.append(element('h2', plugin.id), element('div', `${plugin.version || '未知版本'} · ${states[plugin.status] || plugin.status}`, 'meta'));
+      card.append(element('p', plugin.tools.join(' / ') || '没有注册工具', 'meta'));
+      if (plugin.error) card.append(element('p', plugin.error, 'error'));
+      const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.checked = plugin.enabled;
+      const toggle = element('label', ' 启用插件'); toggle.prepend(enabled); card.append(toggle);
+      const fields = [];
+      const schema = plugin.configSchema?.properties;
+      const properties = schema || Object.fromEntries(Object.keys(plugin.config).map(key => [key, {}]));
+      for (const [key, definition] of Object.entries(properties)) {
+        if (key === 'enabled') continue; // Lifecycle has its own explicit toggle above.
+        const value = plugin.config[key] ?? definition.default;
+        const structured = !['boolean', 'string', 'number', 'integer'].includes(definition.type);
+        const input = document.createElement(structured ? 'textarea' : 'input');
+        const fieldId = 'cfg-' + plugin.id + '-' + fields.length; input.id = fieldId;
+        if (definition.type === 'boolean') { input.type = 'checkbox'; input.checked = value === true; }
+        else if (structured) input.value = value === undefined ? '' : JSON.stringify(value, null, 2);
+        else { input.type = definition.type === 'string' ? (/key|token|secret|password/i.test(key) ? 'password' : 'text') : 'number'; input.value = value ?? ''; if (definition.minimum != null) input.min = definition.minimum; if (definition.maximum != null) input.max = definition.maximum; input.step = definition.type === 'integer' ? '1' : 'any'; }
+        const label = element('label', definition.description || key); label.htmlFor = fieldId; card.append(label, input); fields.push({ key, input, definition, structured });
+      }
+      const save = element('button', '保存配置'); const message = element('p', '', 'meta'); message.setAttribute('role', 'status');
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          const config = { ...plugin.config };
+          for (const { key, input, definition, structured } of fields) {
+            if (input.type === 'checkbox') config[key] = input.checked;
+            else if (!input.value && !Object.hasOwn(plugin.config, key)) delete config[key];
+            else if (structured) config[key] = input.value ? JSON.parse(input.value) : null;
+            else config[key] = definition.type === 'string' ? input.value : Number(input.value);
+          }
+          const result = await api('/api/extensions/config', { id: plugin.id, enabled: enabled.checked, config }); message.textContent = result.message;
+        } catch (error) { message.textContent = error.message; } finally { save.disabled = false; }
+      });
+      card.append(save, message); container.append(card);
+    }
+    status.textContent = `已读取 ${data.plugins.length} 个插件。`;
+  } catch (error) { status.textContent = error.message; }
+}
+document.getElementById('refresh').addEventListener('click', load); load();
+</script></body></html>

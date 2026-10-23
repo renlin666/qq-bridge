@@ -14,4 +14,3 @@ git fetch upstream --tags
 ```
 
 Use feature branches, review changes against the imported baseline, and never force-update published version branches. Keep local configuration, session state, personal assets and third-party local plugins outside Git.
-

@@ -1,0 +1,158 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { parseBingImages, bingImageSearch, createImageSearchStore } from '../src/image-search.js';
+import { registerIntegrationTools } from '../src/mcp-qq-integrations.js';
+import { bridgeHarness } from './audit-bridge-harness.mjs';
+
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=', 'base64');
+const source = 'private:12345', target = 'private:23456';
+const candidate = { title: '孙笑川 表情包', imageUrl: 'https://images.example/meme.png', thumbnailUrl: 'https://images.example/thumb.png', pageUrl: 'https://example.com/memes' };
+const html = item => '<a class="iusc" m="' + JSON.stringify(item).replaceAll('&', '&amp;').replaceAll('"', '&quot;') + '"></a>';
+function fixture(t, extra = {}) {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-image-search-'));
+  t.after(() => { assert.ok(path.resolve(stateDir).startsWith(path.resolve(os.tmpdir()) + path.sep + 'qq-image-search-')); fs.rmSync(stateDir, { recursive: true, force: true }); });
+  const cfg = { webSearch: { enabled: true }, socialV2: { tools: {} } };
+  let self = '99999', clock = 100000;
+  const deps = { stateDir, getConfig: () => cfg, getSelfId: () => self, sessionAllowed: () => true,
+    validateImage: buffer => buffer.equals(png) ? { buffer, mimeType: 'image/png' } : null,
+    fetchImage: async () => ({ buffer: png }), searchImages: async () => ({ provider: 'bing-images', results: [candidate] }),
+    now: () => clock, ...extra };
+  return { deps, cfg, store: createImageSearchStore(deps), setSelf: id => { self = id; }, advance: ms => { clock += ms; } };
+}
+
+test('parses real image metadata, entities and duplicates; rejects non-image URL schemes', () => {
+  const row = { murl: candidate.imageUrl + '?a=1&b=2', turl: candidate.thumbnailUrl, purl: candidate.pageUrl, t: candidate.title };
+  const result = parseBingImages(html(row) + html(row) + html({ ...row, murl: 'file:///private' })
+    + html({ ...row, murl: 'https://user:password@example.com/image' }) + '<a m="{bad}">');
+  assert.equal(result.length, 1); assert.equal(result[0].imageUrl, row.murl);
+});
+
+test('Bing image search filters observed single-character junk and retries the compact subject', async () => {
+  const queries = [];
+  const result = await bingImageSearch('孙笑川 表情包', { fetchHtml: async url => {
+    const q = new URL(url).searchParams.get('q'); queries.push(q);
+    return { statusCode: 200, body: html({ murl: candidate.imageUrl, turl: candidate.thumbnailUrl, purl: candidate.pageUrl,
+      t: queries.length === 1 ? '孙的笔顺 汉字词典' : candidate.title }) };
+  } });
+  assert.equal(result.results.length, 1); assert.equal(queries.length, 2);
+  assert.equal(queries[1], '孙笑川表情包');
+});
+
+test('generic meme/image words cannot make another subject count as relevant', async () => {
+  const result = await bingImageSearch('孙笑川 表情包', { fetchHtml: async () => ({ statusCode: 200,
+    body: html({ murl: candidate.imageUrl, turl: candidate.thumbnailUrl, t: '猫猫表情包' }) }) });
+  assert.equal(result.results.length, 0);
+});
+
+test('search previews and persisted send image use exactly the same validated bytes', async t => {
+  const f = fixture(t);
+  const result = await f.store.search(source, { query: '孙笑川 表情包' });
+  assert.equal(result.previews[0].data, png.toString('base64'));
+  const id = result.images[0].imageId;
+  assert.ok(createImageSearchStore(f.deps).resolve(source, id).buffer.equals(png));
+  assert.throws(() => f.store.resolve(target, id), /不属于/);
+  f.setSelf('88888'); assert.throws(() => f.store.resolve(source, id), /不属于/);
+  f.setSelf('99999'); f.advance(3600001); assert.throws(() => f.store.resolve(source, id), /过期/);
+});
+
+test('blocked original can use the actual indexed thumbnail without inventing image content', async t => {
+  const fetched = [];
+  const f = fixture(t, { fetchImage: async url => { fetched.push(url); if (url === candidate.imageUrl) throw new Error('HTTP 403'); return { buffer: png }; } });
+  const result = await f.store.search(source, { query: '孙笑川' });
+  assert.equal(result.images[0].variant, 'thumbnail'); assert.equal(fetched.length, 2);
+});
+
+test('HTML/non-image bytes and empty search results never become sendable image IDs', async t => {
+  const f = fixture(t, { fetchImage: async () => ({ buffer: Buffer.from('<html>blocked</html>') }) });
+  const result = await f.store.search(source, { query: '孙笑川' });
+  assert.equal(result.images.length, 0); assert.equal(result.previews.length, 0);
+  assert.throws(() => f.store.resolve(source, '../config.json'), /真实 imageId/);
+});
+
+test('search respects off switches and rejects known tokens before any external lookup', async t => {
+  let lookups = 0;
+  const f = fixture(t, { sanitizeText: s => s.replaceAll('fixture-secret', '[redacted]'),
+    searchImages: async () => { lookups++; return { results: [] }; } });
+  await assert.rejects(f.store.search(source, { query: 'fixture-secret' }), /敏感/);
+  f.cfg.webSearch.enabled = false; await assert.rejects(f.store.search(source, { query: '孙笑川' }), /关闭/);
+  f.cfg.webSearch.enabled = true; f.cfg.socialV2.tools.getImages = false;
+  await assert.rejects(f.store.search(source, { query: '孙笑川' }), /未启用/);
+  assert.equal(lookups, 0);
+});
+
+test('permission or source-token revocation during preview download prevents issuing an image ID', async t => {
+  let revoked = false;
+  const f = fixture(t, { fetchImage: async () => { revoked = true; return { buffer: png }; } });
+  await assert.rejects(f.store.search(source, { query: '孙笑川' }, () => { if (revoked) throw new Error('agent token 无效'); }), /token/);
+  assert.equal(fs.existsSync(path.join(f.deps.stateDir, 'image-search/index.json')), false);
+});
+
+test('corrupt cache and changed file bytes fail closed', async t => {
+  const f = fixture(t);
+  const result = await f.store.search(source, { query: '孙笑川' });
+  const id = result.images[0].imageId;
+  fs.writeFileSync(path.join(f.deps.stateDir, 'image-search', id + '.bin'), Buffer.from('changed'));
+  assert.throws(() => f.store.resolve(source, id), /校验失败/);
+  fs.writeFileSync(path.join(f.deps.stateDir, 'image-search/index.json'), '{bad');
+  await assert.rejects(createImageSearchStore(f.deps).search(source, { query: '孙笑川' }), /损坏/);
+});
+
+test('MCP returns image content blocks in the same order as candidate IDs', async () => {
+  const registered = new Map();
+  registerIntegrationTools({ tool: (name, description, schema, fn) => registered.set(name, fn) }, async () => ({
+    images: [{ imageId: 'test' }], previews: [{ mimeType: 'image/png', data: png.toString('base64') }] }), {});
+  const result = await registered.get('qq_search_images')({ key: source, token: 'fixture', query: '孙笑川' });
+  assert.equal(result.content[1].type, 'image');
+  assert.equal(result.content[1].data, png.toString('base64')); assert.ok(!result.content[0].text.includes('previews'));
+});
+
+async function bridge(t, extraGlobals = {}) {
+  const h = await bridgeHarness({ config: { ownerQQ: 12345, allow: { private: ['12345', '23456'], groups: ['456'] }, webSearch: { enabled: true },
+    socialV2: { sharedMemory: { enabled: true, handoffEnabled: true, allowedKeys: [source, target, 'group:456'] } } }, globals: {
+    bingImageSearch: async () => ({ provider: 'bing-images', results: [candidate] }), safeFetchBuffer: async () => ({ buffer: png }), ...extraGlobals } });
+  h.setMode('reserved2'); h.setSelfIdentity('测试机器人', '99999');
+  const token = h.getSocialV2State(source).agentToken;
+  const server = h.startConsoleServer(); if (!server.listening) await new Promise(resolve => server.once('listening', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await h.close(); });
+  const post = async (action, payload, auth = token) => {
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/api/socialV2/integrations/${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-console-token': 'fixture-console-token', 'x-agent-call': '1', 'x-agent-token': auth },
+      body: JSON.stringify({ key: source, ...payload }) });
+    return { status: r.status, data: await r.json() };
+  };
+  return { h, post };
+}
+
+test('real bridge searches/previews and sends to a friend/group/current chat with actual receipts, without collecting', async t => {
+  const { h, post } = await bridge(t);
+  const search = await post('image-search', { query: '孙笑川 表情包', count: 1 });
+  assert.equal(search.status, 200); assert.equal(search.data.previews[0].data, png.toString('base64'));
+  const imageId = search.data.images[0].imageId;
+  const payload = { targetKey: target, imageIds: [imageId], requestId: 'web_image_friend_01' };
+  const friend = await post('contact-send', payload);
+  assert.equal(friend.data.sent, true); assert.equal(friend.data.receipts[0].messageId, '9001');
+  assert.equal(h.calls.http[0].body.user_id, 23456);
+  assert.equal(h.calls.http[0].body.message[0].data.file, 'base64://' + png.toString('base64'));
+  await post('contact-send', payload); assert.equal(h.calls.http.length, 1);
+  const group = await post('image-send', { targetKey: 'group:456', imageId, requestId: 'web_image_group_01' });
+  assert.equal(group.data.sent, true); assert.equal(h.calls.http[1].body.group_id, 456);
+  const current = await post('image-send', { imageId, requestId: 'web_image_current_01' });
+  assert.equal(current.data.sent, true); assert.equal(h.calls.http[2].body.user_id, 12345);
+  assert.equal(h.calls.faces.length, 0);
+  assert.equal((await post('image-send', { imageId, requestId: 'image_wrong_token' }, 'wrong-token')).status, 403);
+});
+
+test('real bridge rejects unissued IDs before QQ transport, and a missing receipt is uncertain', async t => {
+  let writes = 0;
+  const { post } = await bridge(t, { fetch: async () => { writes++; return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: {} }) }; } });
+  assert.equal((await post('image-send', { imageId: 'https://example.com/image.png', requestId: 'invented_image_01' })).status, 400);
+  assert.equal(writes, 0);
+  const search = await post('image-search', { query: '孙笑川' });
+  const payload = { imageId: search.data.images[0].imageId, requestId: 'missing_receipt_01' };
+  const sent = await post('image-send', payload);
+  assert.equal(sent.data.sent, false); assert.equal(sent.data.status, 'uncertain');
+  await post('image-send', payload); assert.equal(writes, 1);
+});
