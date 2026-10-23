@@ -21,6 +21,7 @@ for (const { serverName, script } of SERVERS) {
     args: [path.join(ROOT, script)],
     cwd: ROOT,
     stderr: 'pipe',
+    env: { ...process.env, QQ_BRIDGE_OFFLINE_CATALOG: '1' },
   });
   const client = new Client({ name: 'dsh-mcp-probe', version: '0.0.0' });
   try {

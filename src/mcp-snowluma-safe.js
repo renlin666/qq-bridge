@@ -1375,5 +1375,17 @@ if (cfg.socialV2?.tools?.getForwardMsg !== false) {
   );
 }
 
-registerIntegrationTools(server, agentApi, cfg);
+let extensionCatalog;
+if (process.env.QQ_BRIDGE_OFFLINE_CATALOG !== '1') {
+  try {
+    const result = await agentApi('/api/extensions/catalog', { timeoutMs: 2500 });
+    extensionCatalog = result.tools;
+  } catch (error) {
+    // Only an unavailable bridge uses the metadata-only disk fallback. Auth/config
+    // failures must not turn into an apparently working tool catalogue.
+    if (!/fetch failed|ECONNREFUSED|timeout|aborted/i.test(String(error.message))) extensionCatalog = [];
+    console.error('[extensions] bridge catalogue unavailable; reconnect MCP after starting/updating bridge');
+  }
+}
+registerIntegrationTools(server, agentApi, cfg, extensionCatalog);
 await server.connect(new StdioServerTransport());

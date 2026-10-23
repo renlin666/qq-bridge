@@ -22,12 +22,13 @@ test('video frames reach MCP as image blocks with timestamps, never base64 text'
   const video = { title: 'fixture', visualStatus: 'available', transcriptStatus: 'available', transcript: 'actual speech',
     frames: [{ seconds: 8.25, mimeType: 'image/jpeg', data: 'fixture-base64' }] };
   registerIntegrationTools({ tool: (name, _description, _schema, handler) => tools.set(name, handler) }, async (url, init) => {
-    call = { url, ...init }; return { ok: true, video };
+    call = { url, ...init }; return videoToolResult({ ok: true, video });
   }, { integrations: { bilibili: { enabled: true } } });
   const result = await tools.get('qq_read_bilibili')({ key: 'group:456', token: 'fixture-token', messageId: 99,
     startSeconds: 8, endSeconds: 10, frameCount: 2 });
-  assert.equal(call.timeoutMs, 600000);
-  assert.equal(JSON.parse(call.body).startSeconds, 8);
+  assert.equal(call.timeoutMs, 605000);
+  assert.equal(call.url, '/api/socialV2/extensions/call');
+  assert.equal(JSON.parse(call.body).arguments.startSeconds, 8);
   assert.ok(!call.body.includes('fixture-token'));
   assert.deepEqual(result.content.map(b => b.type), ['text', 'text', 'image']);
   assert.equal(result.content[2].data, 'fixture-base64');

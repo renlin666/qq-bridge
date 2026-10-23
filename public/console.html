@@ -1772,6 +1772,7 @@ button:active:not(:disabled) {
       <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
       <button data-view="slang" class="nav-item"><span class="nav-icon" aria-hidden="true">▤</span>黑话词库</button>
       <div class="nav-label">管理</div>
+      <a href="/extensions" id="extensionsOpen" class="nav-item">功能插件</a>
       <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true">◧</span>令牌与花费</button>
       <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true">⊙</span>访问与安全</button>
       <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
@@ -5076,6 +5077,12 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
     if (!stored()) apply(event.matches ? 'dark' : 'light', false);
   });
 })();
+</script>
+<script>
+document.getElementById('extensionsOpen').addEventListener('click', function (event) {
+  event.preventDefault();
+  location.href = '/extensions?token=' + encodeURIComponent(localStorage.getItem('consoleToken') || '');
+});
 </script>
 </body>
 </html>

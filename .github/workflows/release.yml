@@ -1,0 +1,27 @@
+name: Publish version
+on:
+  push:
+    branches: ['release/v*']
+permissions:
+  contents: write
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=moderate
+      - run: npm test
+      - run: npm run test:mcp-servers
+      - run: npm run release:check
+      - name: Publish exact version and commit
+        run: node scripts/github-release.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

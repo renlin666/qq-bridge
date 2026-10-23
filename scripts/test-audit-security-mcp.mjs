@@ -82,7 +82,8 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
   const source = fs.readFileSync(new URL('../src/mcp-snowluma-safe.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace("const __dirname = path.dirname(fileURLToPath(import.meta.url));", "const __dirname = '/fixture/src';")
-    .replace('await server.connect(new StdioServerTransport());', 'server.connect(new StdioServerTransport());');
+    // Startup/catalogue discovery is covered by the actual stdio and host tests.
+    .replace(/let extensionCatalog;[\s\S]*$/, 'registerIntegrationTools(server, agentApi, cfg);');
   class McpServer {
     constructor() { this.tool = (name, description, schema, callback) => tools.set(name, { schema, callback }); }
     connect() {}

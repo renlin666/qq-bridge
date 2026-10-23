@@ -1,0 +1,17 @@
+{
+  "id": "echo",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "./index.js",
+  "capabilities": ["messages.read", "messages.send"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": { "prefix": { "type": "string", "maxLength": 80, "default": "收到：", "description": "回复前缀" } }
+  },
+  "tools": [{
+    "name": "qq_ext_echo_echo",
+    "description": "示例插件：返回当前会话的文字和已观察消息数，不发送 QQ 消息。",
+    "inputSchema": { "type": "object", "properties": { "text": { "type": "string", "maxLength": 300 } }, "required": ["text"], "additionalProperties": false }
+  }]
+}
