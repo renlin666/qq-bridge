@@ -163,7 +163,7 @@ node scripts/setup-dsh.mjs
 
 2. **装桥接并复制配置**
    ```bash
-   git clone https://github.com/Derpyu520/qq-bridge.git
+   git clone https://github.com/renlin666/qq-bridge.git
    cd qq-bridge
    npm install
    ```
