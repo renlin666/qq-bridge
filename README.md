@@ -1,5 +1,9 @@
 # QQ ↔ DeepSeek Harness 桥接
 
+> **本分支：0.3.0-rc.1 · 项目自身的功能插件 API v1**。支持独立注册工具、消息事件、命令、定时任务和配置；B站、搜图、夸克、空间已接入。安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)，版本变更见 [CHANGELOG](CHANGELOG.md)，来源和上游关系见 [UPSTREAM](UPSTREAM.md)。下文保留原项目的安装与协议说明，其中原版本号指上游基线。
+>
+> 本机自定义角色、配置和运行数据不发布。需要示例人格卡时，可将 `examples/roles/小鲸鱼.md` 复制到 `roles/小鲸鱼.md` 后自行编辑。
+
 > 本机新增：QQ 空间发布、B站分享卡片阅读、夸克磁力文件清单与桌面一键启动。用法、配置及验证限制见 [扩展功能说明](docs/guides/QQ_EXTENSIONS.md)。
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)

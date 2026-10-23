@@ -12,7 +12,7 @@ const text = value => String(value ?? '').replace(/[\r\n\u0000-\u001f]/g, ' ').t
 // One bridge process owns this store. DSH windows always read the same current data.
 export function createSocialHub({ stateDir, getConfig, getConversation, getConversations, getSelfId,
   sessionAllowed, deliver, fetchImage = safeFetchBuffer, sanitizeText = value => String(value ?? ''),
-  onebot, getSticker = () => null, sendContactPart, searchImages,
+  onebot, getSticker = () => null, sendContactPart, sendLocalPart = sendContactPart, searchImages,
   validateImage = buffer => ({ buffer, mimeType: 'image/jpeg' }) }) {
   const file = path.join(stateDir, 'shared-memory.json');
   let data = { version: 1, memories: [], handoffs: [], contactSends: [] };
@@ -169,7 +169,9 @@ export function createSocialHub({ stateDir, getConfig, getConversation, getConve
       error: row.error || undefined,
       hint: sent ? 'QQ 网关已接受并返回消息编号；这不代表好友已读。' : '未确认全部发送，不能声称已发送；查询本 requestId，禁止换编号自动重发。' };
   }
-  async function handle(action, key, body, assertScope = () => {}) {
+  const localSendAuthority = Symbol('plugin-local-send');
+  async function handle(action, key, body, assertScope = () => {}, authority) {
+    const localSend = authority === localSendAuthority && action === 'contact-send' && body.targetKey === key;
     if (action === 'image-search') return imageSearch.search(key, body, assertScope);
     if (action === 'image-send') return handle('contact-send', key,
       { targetKey: body.targetKey || key, imageIds: [body.imageId], requestId: body.requestId }, assertScope);
@@ -184,7 +186,7 @@ export function createSocialHub({ stateDir, getConfig, getConversation, getConve
       return { userId: id, image: { mimeType: image.mimeType, data: image.buffer.toString('base64') } };
     }
     if (!action.startsWith('shared-') && !action.startsWith('handoff') && !action.startsWith('contact-') ) return null;
-    if (!sharedAllowed(key)) fail('此会话未获跨会话联动授权', 403);
+    if (!localSend && !sharedAllowed(key)) fail('此会话未获跨会话联动授权', 403);
     if (action.startsWith('contact-send') && !writable) fail('发送记录无法读取，已暂停发送以避免重复', 503);
     if (action.startsWith('shared-') && getConfig().socialV2?.tools?.memory === false) fail('记忆工具未启用', 403);
     if (action === 'shared-query') return { memories: query(key, body) };
@@ -208,8 +210,8 @@ export function createSocialHub({ stateDir, getConfig, getConversation, getConve
       const target = String(body.targetKey ?? '');
       const assertAllowed = () => {
         assertScope();
-        if (account() !== bot || !sharedAllowed(key) || !sharedAllowed(target)
-          || getConfig().socialV2?.sharedMemory?.handoffEnabled !== true) fail('跨会话发送授权已撤销或目标不在授权范围内', 403);
+        if (account() !== bot || (!localSend && (!sharedAllowed(key) || !sharedAllowed(target)
+          || getConfig().socialV2?.sharedMemory?.handoffEnabled !== true))) fail('跨会话发送授权已撤销或目标不在授权范围内', 403);
         if (getConfig().socialV2?.tools?.sendMessage === false && (body.messages?.length ?? 0) > 0) fail('文字发送工具未启用', 403);
         if (getConfig().socialV2?.tools?.sendSticker === false && (body.stickerIds?.length ?? 0) > 0) fail('表情发送工具未启用', 403);
         if (getConfig().socialV2?.tools?.sendSticker === false && (body.imageIds?.length ?? 0) > 0) fail('图片发送工具未启用', 403);
@@ -247,7 +249,7 @@ export function createSocialHub({ stateDir, getConfig, getConversation, getConve
           assertAllowed();
           // Persist BEFORE the network write. A crash/timeout cannot trigger an automatic duplicate.
           part.status = 'sending'; save();
-          const receipt = await sendContactPart(target, part, assertAllowed, key);
+          const receipt = await (localSend ? sendLocalPart : sendContactPart)(target, part, assertAllowed, key);
           if (!/^-?[1-9]\d*$/.test(String(receipt?.messageId ?? ''))) throw new Error('QQ 网关没有返回有效消息编号，发送结果未知');
           part.messageId = String(receipt.messageId); part.status = 'sent'; save();
         } catch (error) {
@@ -310,5 +312,6 @@ export function createSocialHub({ stateDir, getConfig, getConversation, getConve
     }
   }
   return { handle, format, query, remember, resolvePerson, migrate, syncImpressions, inbox, sharedAllowed, replayHandoffs,
+    sendLocal: (key, messages, requestId, authorize) => handle('contact-send', key, { targetKey: key, messages, requestId }, authorize, localSendAuthority),
     imageForSend: imageSearch.resolve };
 }

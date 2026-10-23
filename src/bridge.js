@@ -63,6 +63,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
+let closeProjectExtensions = async () => {};
 const STATE_DIR = path.join(ROOT, 'state');
 const STATE_FILE = path.join(STATE_DIR, 'sessions.json');
 const ROLE_STATE_FILE = path.join(STATE_DIR, 'current-role.json');
@@ -698,6 +699,7 @@ function loadConfig() {
     consolePort: file.consolePort ?? 3100,
     consoleToken: file.consoleToken ?? '',
     integrations: file.integrations ?? {},
+    extensions: file.extensions ?? {},
     webSearch: file.webSearch ?? {},
     // 价目表覆盖项（可选）。留空即用 src/model-prices.js 的官方默认价。
     pricing: file.pricing ?? null,
@@ -1391,6 +1393,7 @@ let stateDirHardened = null;
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 async function main() {
   const cfg = loadConfig();
+  let projectExtensions = null;
   fs.mkdirSync(STATE_DIR, { recursive: true });
   hardenStateDirAcl();
   acquireLock();
@@ -3156,7 +3159,8 @@ async function main() {
     // 二代会话工具必须仍命中当前模式的白名单/准入；避免白名单移除后旧 agentToken 继续读状态。
     const v2SessionAllowed = isSessionAllowedInCurrentMode;
     const handleIntegration = createIntegrations({
-      stateDir: STATE_DIR, getConfig: () => cfg,
+      stateDir: STATE_DIR, getConfig: () => cfg, log,
+      backgroundAllowed: () => currentMode === 'reserved2' && !socialV2.paused && cfg.socialV2?.enabled !== false,
       onebot: (action, params) => bot.raw(action, params),
       getConversation: key => socialV2.conversations.get(key),
       sessionAllowed: v2SessionAllowed, tokenOk: agentTokenOk, socialHub,
@@ -3183,12 +3187,8 @@ async function main() {
         await wakeExternalV2(key, 'qzoneComment');
       }
     });
-    const pollQzone = () => {
-      if (currentMode !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false) return;
-      void handleIntegration.pollQzone().catch(error => log('空间评论检查失败:', error?.message ?? error));
-    };
-    setInterval(pollQzone, Math.max(60000, Number(cfg.integrations?.qzone?.pollIntervalMs) || 120000)).unref?.();
-    setTimeout(pollQzone, 10000).unref?.();
+    projectExtensions = handleIntegration.host;
+    closeProjectExtensions = () => handleIntegration.close();
     const server = http.createServer(async (req, res) => {
       let url;
       try { url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`); }
@@ -3337,6 +3337,7 @@ async function main() {
         }
         if (!hasToken) {
           const tokenlessAgentAllowed = url.pathname === '/api/status'
+            || (req.method === 'GET' && url.pathname === '/api/extensions/catalog')
             || url.pathname.startsWith('/api/send/')
             || url.pathname.startsWith('/api/images/');
           if (!tokenlessAgentAllowed) {
@@ -3403,6 +3404,7 @@ async function main() {
         // 其余（人格/提示词/思考强度/白名单/重启…）一律 403——避免以后新增管理端点时忘记拉黑。
         if (req.headers['x-agent-token']) {
           const agentAllowed = url.pathname === '/api/status'
+            || (req.method === 'GET' && url.pathname === '/api/extensions/catalog')
             || url.pathname.startsWith('/api/socialV2/')
             || url.pathname.startsWith('/api/send/')
             || url.pathname.startsWith('/api/images/')
@@ -3411,6 +3413,27 @@ async function main() {
             sendJson({ ok: false, error: '该接口仅控制台可用' }, 403);
             return;
           }
+        }
+        if (req.method === 'GET' && url.pathname === '/extensions') {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
+          res.end(fs.readFileSync(path.join(ROOT, 'public', 'extensions.html'))); return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/extensions') {
+          sendJson({ plugins: await projectExtensions.describe(), restartRequiredForEnable: true }); return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/extensions/config') {
+          const body = await readBody();
+          if (typeof body.enabled !== 'boolean') throw Object.assign(new Error('enabled 必须是布尔值'), { statusCode: 400 });
+          const config = await projectExtensions.validateConfig(body.id, body.config);
+          const file = path.join(ROOT, 'config.json');
+          const saved = readConfigObject(file);
+          const extensions = { ...saved.extensions, [body.id]: { ...saved.extensions?.[body.id], enabled: body.enabled, config } };
+          const temp = file + '.extensions.tmp';
+          fs.writeFileSync(temp, JSON.stringify({ ...saved, extensions }, null, 2), { mode: 0o600 });
+          fs.renameSync(temp, file);
+          cfg.extensions = extensions;
+          if (!body.enabled) await projectExtensions.stop(body.id);
+          sendJson({ ok: true, requiresRestart: true, message: '配置已保存；停用立即生效，启用和完整应用配置请重启桥接并重连现有 QQ MCP。' }); return;
         }
         if (await handleIntegration({ req, url, readBody, sendJson })) return;
         // 只读降级：黑话库/表情库在启动时加载失败时，写接口必须**明确失败**。
@@ -4735,16 +4758,9 @@ async function main() {
           for (const [flag, name] of Object.entries(toolMap)) {
             if (tools[flag] !== false && !(stickerToolFlags.has(flag) && !stickerEnabled())) enabledTools.push(name);
           }
-          if (cfg.integrations?.bilibili?.enabled !== false) enabledTools.push('qq_read_bilibili');
-          if (cfg.integrations?.quark?.enabled === true) enabledTools.push('qq_quark_status', 'qq_inspect_magnet');
           enabledTools.push('qq_get_avatar');
-          if (cfg.webSearch?.enabled !== false && cfg.webSearch?.images?.enabled !== false && tools.getImages !== false) enabledTools.push('qq_search_images');
-          if (socialHub.sharedAllowed(key) && tools.sendSticker !== false) enabledTools.push('qq_send_image');
+          for (const tool of await projectExtensions.catalog()) enabledTools.push(tool.name);
           if (socialHub.sharedAllowed(key)) enabledTools.push('qq_shared_memory_query', 'qq_shared_memory_remember', 'qq_shared_memory_remove', 'qq_list_linked_conversations', 'qq_find_contact', 'qq_send_to_contact', 'qq_get_contact_send_status', 'qq_handoff', 'qq_get_handoff_status', 'qq_ack_handoff');
-          if (cfg.integrations?.qzone?.enabled === true && cfg.integrations.qzone.allowedKeys?.includes(key)) {
-            enabledTools.push('qq_publish_qzone');
-            if (cfg.integrations.qzone.commentsEnabled === true) enabledTools.push('qq_list_qzone', 'qq_get_qzone_comments', 'qq_react_qzone');
-          }
           sendJson({
             ok: true,
             key,
@@ -7130,8 +7146,9 @@ async function main() {
         // ── 重启桥接（守护模式下 5 秒后自动拉起） ──────────────────────────────
         if (req.method === 'POST' && url.pathname === '/api/restart') {
           sendJson({ ok: true, message: '正在重启桥接（若由守护窗口启动，5 秒后自动恢复）…' });
-          setTimeout(() => {
+          setTimeout(async () => {
             log('控制台：重启桥接');
+            await closeProjectExtensions();
             // 退出前落盘：SIGINT/SIGTERM 的收尾路径会 saveState()/saveSocialV2State()，
             // 而重启这条路径以前直接 process.exit，500ms 窗口内改动的唤醒配置/计数器会丢。
             try { saveState(); } catch (error) { log('重启前保存会话映射失败:', error?.message ?? error); }
@@ -7147,6 +7164,7 @@ async function main() {
         sendJson({ ok: false, error: error?.message ?? String(error) }, status);
       }
     });
+    server.on('close', () => { void handleIntegration.close().catch(error => log('插件关闭失败:', error.message)); });
     server.listen(port, '127.0.0.1', () => {
       log(`本地控制台已启动：http://127.0.0.1:${port}`);
     });
@@ -7989,14 +8007,14 @@ async function main() {
 
   // Cross-window delivery is executed here, not delegated to another model turn.
   // Keep the existing queue, sticker downloader, permissions, silent mode and quotas.
-  async function sendContactPartV2(key, part, assertAuthorized, sourceKey) {
+  async function sendContactPartV2(key, part, assertAuthorized, sourceKey, { pluginLocal = false } = {}) {
     let attempted = false;
     try {
       const guard = captureSendGuard(key);
       const sourceGuard = captureSendGuard(sourceKey);
       const beforeSend = () => {
         assertAuthorized(); guard(); sourceGuard();
-        if (currentMode !== 'reserved2' || shouldBlockSilentReply(key) || shouldBlockSilentReply(sourceKey)) throw new Error('当前模式或静默状态不允许发送');
+        if ((!pluginLocal && currentMode !== 'reserved2') || shouldBlockSilentReply(key) || shouldBlockSilentReply(sourceKey)) throw new Error('当前模式或静默状态不允许发送');
         if (!v2ToolEnabled(part.type === 'text' ? 'sendMessage' : 'sendSticker')) throw new Error('发送工具未启用');
         const st = getSocialV2State(key);
         const sendCfg = cfg.socialV2?.send ?? {};
@@ -8284,6 +8302,7 @@ async function main() {
     onebot: (action, params) => bot.raw(action, params),
     getSticker: id => stickerEntries.find(s => String(s.id) === String(id)),
     sendContactPart: sendContactPartV2,
+    sendLocalPart: (key, part, authorize, sourceKey) => sendContactPartV2(key, part, authorize, sourceKey, { pluginLocal: true }),
     deliver: async (key, handoff) => {
       const st = getSocialV2State(key);
       const messageId = `handoff:${handoff.id}`;
@@ -10870,6 +10889,28 @@ async function main() {
       return;
     }
 
+    // Plugins see only admitted messages after approval/silent-mode handling.
+    if (projectExtensions) {
+      const epoch = sessionEpoch;
+      const policy = sessionPolicy(key);
+      const scope = { key, isOwner, messageId: messageRef, assertAuthorized() {
+        if (epoch !== sessionEpoch || policy !== sessionPolicy(key) || !isSessionAllowedInCurrentMode(key)
+          || (currentMode === 'reserved2' && (socialV2.paused || cfg.socialV2?.enabled === false))
+          || (readRoleState().mode === 'silent' && !isOwner)) {
+          throw Object.assign(new Error('插件消息处理权限已撤销'), { statusCode: 403 });
+        }
+      } };
+      try {
+        scope.assertAuthorized();
+        if (await projectExtensions.dispatchCommand(plainContent, scope)) return;
+        await projectExtensions.dispatchMessage({ key, messageId: event.message_id ?? event.msg_id ?? null,
+          userId: String(event.user_id ?? ''), text: redactKnownTokensOnly(plainContent) }, scope);
+      } catch (error) {
+        log('插件消息/命令处理失败:', error.message);
+        if (error.pluginCommand) return; // A failed owned command must not fall through to a model turn.
+      }
+    }
+
     // 管理命令：仅管理员（ownerQQ）可用，且由桥接直接执行（硬性，不经过模型）
     if (plainContent.startsWith('/')) {
       if (!isOwner) {
@@ -12046,13 +12087,15 @@ async function main() {
   await pumpMux();
 }
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   log('退出中…');
+  await closeProjectExtensions();
   saveState();
   releaseLock();
   process.exit(0);
 });
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
+  await closeProjectExtensions();
   saveState();
   releaseLock();
   process.exit(0);

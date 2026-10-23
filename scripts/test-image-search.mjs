@@ -103,7 +103,7 @@ test('corrupt cache and changed file bytes fail closed', async t => {
 test('MCP returns image content blocks in the same order as candidate IDs', async () => {
   const registered = new Map();
   registerIntegrationTools({ tool: (name, description, schema, fn) => registered.set(name, fn) }, async () => ({
-    images: [{ imageId: 'test' }], previews: [{ mimeType: 'image/png', data: png.toString('base64') }] }), {});
+    content: [{ type: 'text', text: JSON.stringify({ images: [{ imageId: 'test' }] }) }, { type: 'image', mimeType: 'image/png', data: png.toString('base64') }] }), {});
   const result = await registered.get('qq_search_images')({ key: source, token: 'fixture', query: '孙笑川' });
   assert.equal(result.content[1].type, 'image');
   assert.equal(result.content[1].data, png.toString('base64')); assert.ok(!result.content[0].text.includes('previews'));

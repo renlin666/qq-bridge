@@ -1,0 +1,74 @@
+{
+  "id": "quark",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "./index.js",
+  "capabilities": [
+    "messages.read",
+    "drive.inspect"
+  ],
+  "tools": [
+    {
+      "name": "qq_quark_status",
+      "description": "检查本机夸克解析是否可连接，不读取账号凭据或网盘文件。",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "action": "quark-status",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "qq_inspect_magnet",
+      "description": "调用本机夸克的仅解析接口，查看当前会话收到的磁力链接的文件名、大小和相对路径清单。不保存、不下载。只能说明包内文件，不能声称已经阅读文件正文或看过视频。需本机夸克已登录；失败如实说明，不编造内容。",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "含磁力链接消息的 messageId 或 seq"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "messageId"
+        ],
+        "additionalProperties": false
+      },
+      "action": "magnet",
+      "timeoutMs": 90000
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "description": "enabled"
+      },
+      "executable": {
+        "type": "string",
+        "description": "executable"
+      },
+      "debugPort": {
+        "type": "number",
+        "description": "debugPort"
+      }
+    }
+  }
+}
