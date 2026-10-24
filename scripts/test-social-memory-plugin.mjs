@@ -5,6 +5,87 @@ import os from 'node:os';
 import path from 'node:path';
 import { createIntegrations } from '../src/project-integrations.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { createReactions } from '../extensions/social-memory/reactions.js';
+
+test('临时反应独立于人、机器人和会话，逐渐衰减；重放不续期，重启可恢复', () => {
+  let timestamp = 1000000, persisted = {};
+  const storage = { get: () => structuredClone(persisted), set: (_key, value) => { persisted = structuredClone(value); } };
+  const reactions = createReactions(storage, () => timestamp);
+  assert.equal(reactions.record('bot', 'group:456', '123', 'source', 'annoyed').applied, true);
+  assert.equal(reactions.get('bot', 'group:456', '123').label, '不耐烦');
+  for (const args of [['bot', 'private:123', '123'], ['bot', 'group:456', '789'], ['other-bot', 'group:456', '123']]) {
+    assert.equal(reactions.get(...args), null);
+  }
+  timestamp += 5 * 60000;
+  assert.equal(reactions.get('bot', 'group:456', '123').intensity, 0.5);
+  assert.equal(reactions.record('bot', 'group:456', '123', 'source', 'annoyed').duplicate, true);
+  assert.equal(createReactions(storage, () => timestamp).get('bot', 'group:456', '123').intensity, 0.5);
+  timestamp += 5 * 60000;
+  assert.equal(reactions.get('bot', 'group:456', '123'), null);
+  reactions.record('bot', 'group:456', '123', 'new-source', 'conflict');
+  reactions.record('bot', 'group:456', '123', 'apology', 'repair');
+  assert.equal(reactions.get('bot', 'group:456', '123').label, '缓和');
+});
+
+test('高好感允许互损和短暂不悦，临时反应不加减分、不泄露到私聊，证据与撤权有效', async t => {
+  const timestamp = Date.now();
+  t.mock.method(Date, 'now', () => timestamp);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-reactions-'));
+  const cfg = { allow: { private: ['789'], groups: ['456'] }, extensions: { 'social-memory': { enabled: true, config: { minimumTiers: { '789': '亲近' } } } } };
+  const message = { messageId: 'joke', botAccountId: '10001', userId: '789', sender: 'fixture',
+    text: '你这局又开始嘴硬了', plain: '你这局又开始嘴硬了' };
+  const state = { recentMessages: [message] };
+  const options = { stateDir: dir, getConfig: () => cfg, getConversation: () => state,
+    sessionAllowed: () => true, tokenOk: () => true };
+  let integration = createIntegrations(options);
+  let db;
+  t.after(async () => { db?.close(); await integration.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const scope = { key: 'group:456', assertAuthorized() {} };
+  await integration.host.dispatchMessage(message, scope);
+  const { DatabaseSync } = await import('node:sqlite');
+  db = new DatabaseSync(path.join(dir, 'extensions/social-memory/memory.db'), { readOnly: true });
+  const before = db.prepare('SELECT closeness,familiarity,trust FROM relationships').get();
+  const call = args => integration.host.callTool('qq_social_relationship_event', { messageId: message.messageId, ...args }, scope)
+    .then(result => JSON.parse(result.content[0].text));
+  const result = await call({ kind: 'banter', evidence: '又开始嘴硬' });
+  assert.equal(result.transient, true);
+  assert.equal(result.reaction.kind, 'banter');
+  assert.match(await integration.contextFor(scope.key), /熟人互损|嘴硬/);
+  assert.equal((await call({ kind: 'annoyed', evidence: '嘴硬' })).duplicate, true);
+  message.messageId = 'irritation'; message.text = message.plain = '这话让人不舒服，别说了';
+  await call({ kind: 'annoyed', evidence: '别说了' });
+  const group = await integration.contextFor(scope.key);
+  assert.match(group, /"reaction":\{"kind":"annoyed"/);
+  assert.match(group, /高好感不是讨好/);
+  assert.doesNotMatch(await integration.contextFor('private:789'), /"reaction"/);
+  assert.deepEqual(db.prepare('SELECT closeness,familiarity,trust FROM relationships').get(), before);
+  await assert.rejects(call({ kind: 'annoyed', evidence: '不在原消息里的捏造内容' }), /证据/);
+  await integration.close(); integration = createIntegrations(options);
+  assert.match(await integration.contextFor(scope.key), /"reaction":\{"kind":"annoyed"/);
+  message.messageId = 'repair'; message.text = message.plain = '刚才说重了，对不起';
+  await call({ kind: 'repair', evidence: '对不起' });
+  assert.match(await integration.contextFor(scope.key), /缓和/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, 'extensions/social-memory/reactions.json'), 'utf8'), /说重了|对不起|不舒服/);
+  cfg.allow.private = [];
+  await assert.rejects(call({ kind: 'banter', evidence: '对不起' }), /允许建档/);
+});
+
+test('多人同聊分别提供相处方式，主说话人保留关键词；总上下文有界', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-multi-attitude-'));
+  const cfg = { allow: { private: ['123', '789'], groups: ['456'] }, extensions: { 'social-memory': { enabled: true,
+    config: { minimumTiers: { '789': '亲近' } } } } };
+  const messages = ['123', '789'].map((userId, i) => ({ messageId: String(i), botAccountId: '10001', userId,
+    sender: 'fixture', text: '继续聊今天的事', plain: '继续聊今天的事' }));
+  const integration = createIntegrations({ stateDir: dir, getConfig: () => cfg, getConversation: () => ({ recentMessages: messages }),
+    sessionAllowed: () => true, tokenOk: () => true });
+  t.after(async () => { await integration.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const scope = { key: 'group:456', assertAuthorized() {} };
+  for (const message of messages) await integration.host.dispatchMessage(message, scope);
+  const context = await integration.contextFor(scope.key);
+  assert.match(context, /"userId":"123"/); assert.match(context, /"userId":"789"/);
+  assert.match(context, /公开的梗/); assert.match(context, /熟人互损/);
+  assert.ok(context.length <= 1500);
+});
 
 test('正式内置记忆插件：真实来源绑定、持久关键词索引、上下文、撤销和重启删除', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-social-memory-'));

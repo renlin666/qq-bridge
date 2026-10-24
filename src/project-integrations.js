@@ -138,11 +138,20 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
   handle.host = host;
   handle.contextFor = async key => {
     const st = getConversation(key);
-    const message = [...(st?.recentMessages ?? [])].reverse().find(m => !m.isSelf && m.userId && m.botAccountId);
-    if (!message) return '';
-    return host.collectContext({ ...message, query: String(message.plain ?? message.text ?? '').slice(0, 200) }, {
-      key, assertAuthorized() { if (!sessionAllowed(key)) fail('记忆会话权限已撤销', 403); }
-    });
+    const recent = st?.unread?.length ? st.unread.slice(-12) : (st?.recentMessages ?? []).slice(-6);
+    const seen = new Set(), chunks = [];
+    for (const message of [...recent].reverse()) {
+      if (message.isSelf || !message.userId || !message.botAccountId || seen.has(String(message.userId))) continue;
+      seen.add(String(message.userId));
+      const chunk = await host.collectContext({ ...message, attitudeOnly: seen.size > 1,
+        query: String(message.plain ?? message.text ?? '').slice(0, 200) }, {
+        key, assertAuthorized() { if (!sessionAllowed(key)) fail('记忆会话权限已撤销', 403); }
+      });
+      if (chunks.join('\n').length + (chunks.length ? 1 : 0) + chunk.length > 1500) break;
+      if (chunk) chunks.push(chunk);
+      if (seen.size >= 3) break;
+    }
+    return chunks.join('\n');
   };
   handle.ready = host.ready;
   handle.pollQzone = () => backgroundAllowed() ? qzone.poll() : Promise.resolve();
