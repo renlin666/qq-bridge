@@ -38,9 +38,11 @@ test('未@视频恢复普通唤醒，旧消息快照显示标题；许可回复�
     assert.equal(snapshot.messages[0].videoWatch.status, 'not-read');
     assert.match(h.buildWakePromptV2('group:456', 'timeout'), /标题不是观看证据/);
     await h.handleIncoming('group', 456, { self_id: 10001, user_id: 123, group_id: 456, message_id: 'approval',
-      sender: { nickname: 'fixture' }, message: [{ type: 'reply', data: { id: 'share' } }, { type: 'text', data: { text: '允许观看视频' } }] }, h.cfg);
+      sender: { nickname: 'fixture' }, message: [{ type: 'reply', data: { id: 'share' } }, { type: 'at', data: { qq: '123' } }, { type: 'text', data: { text: '允许观看视频' } }] }, h.cfg);
     assert.equal(st.recentMessages.at(-1).replyToMessageId, 'share');
-    assert.equal(st.recentMessages.at(-1).plain, '允许观看视频');
+    assert.match(st.recentMessages.at(-1).plain, /@/);
+    assert.equal(st.recentMessages.at(-1).approvalText, '允许观看视频');
+    assert.ok(videoApproval(st.recentMessages[0], [st.recentMessages.at(-1)], { approvalUserId: '123' }));
   } finally { await h.close(); }
 });
 

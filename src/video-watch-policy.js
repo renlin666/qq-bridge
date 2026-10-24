@@ -28,7 +28,7 @@ export function videoApproval(message, messages, config, approvalMessageId) {
   return messages.find(candidate => {
     if (candidate.isSelf || String(candidate.userId ?? '') !== approver) return false;
     if (approvalMessageId != null && ![candidate.seq, candidate.messageId].some(id => id != null && String(id) === String(approvalMessageId))) return false;
-    const match = /^允许观看视频(?:\s+(-?\d+))?[。！!]?\s*$/.exec(String(candidate.plain ?? candidate.text ?? '').trim());
+    const match = /^允许观看视频(?:\s+(-?\d+))?[。！!]?\s*$/.exec(String(candidate.approvalText ?? candidate.plain ?? candidate.text ?? '').trim());
     if (!match) return false;
     if (match[1]) return [message.seq, message.messageId].some(id => id != null && String(id) === match[1]);
     return message.messageId != null && String(candidate.replyToMessageId ?? '') === String(message.messageId);
