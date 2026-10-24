@@ -27,7 +27,7 @@ export function cardToText(data) {
     if (typeof value === 'string') { strings.push(value); return; }
     if (!value || typeof value !== 'object') return;
     for (const [key, child] of Object.entries(value)) {
-      if (['title', 'desc', 'summary', 'prompt'].includes(key) && typeof child === 'string') titles.push(child.slice(0, 250));
+      if (['title', 'desc', 'summary', 'prompt'].includes(key) && typeof child === 'string') titles.push(child.replace(/\s+/g, ' ').slice(0, 250));
       visit(child, depth + 1);
     }
   }
