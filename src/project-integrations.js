@@ -8,7 +8,7 @@ import { createQzonePublisher } from './qzone-publisher.js';
 import { createPluginHost } from './plugin-host/index.js';
 import { extensionConfig, extensionEnabled } from './plugin-host/catalog.js';
 import { biliReferences } from './bilibili.js';
-import { videoPolicy, videoDurationReason, skippedVideo } from './video-watch-policy.js';
+import { videoPolicy, videoDurationReason, skippedVideo, videoApproval } from './video-watch-policy.js';
 import { legacyMemoryEntries } from './legacy-memory-source.js';
 
 export const INTEGRATION_PREFIX = '/api/socialV2/integrations/';
@@ -75,16 +75,22 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       authorize();
       if (!extensionEnabled('bilibili', getConfig())) fail('B站解析已关闭', 403);
       const media = extensionConfig('bilibili', getConfig());
-      const policy = videoPolicy(media);
       const message = readMessage(key, options.messageId);
-      if (!message || message.directAtSelf !== true) return skippedVideo('mention_required', policy);
+      if (!message) fail('视频消息不属于当前会话', 404);
+      const approvals = () => {
+        const st = getConversation(key);
+        return videoApproval(message, [...(st?.recentMessages ?? []), ...(st?.unread ?? [])],
+          extensionConfig('bilibili', getConfig()), options.approvalMessageId);
+      };
+      const approved = approvals();
       const refs = biliReferences(`${(message.sharedLinks ?? []).join('\n')}\n${message.text ?? ''}\n${message.plain ?? ''}\n${message.tail ?? ''}`);
       if (!refs.includes(reference)) fail('视频链接不属于当前消息', 403);
-      const result = await readVideo(reference, { ...options, media, stateDir });
+      const result = await readVideo(reference, { ...options, media, stateDir, watchApproved: !!approved });
       authorize();
       const current = videoPolicy(extensionConfig('bilibili', getConfig()));
-      const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current);
-      return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration) : result;
+      const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current, !!approvals());
+      return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration)
+        : { ...result, watchAuthorization: approved ? 'explicit-approval' : 'duration-limit' };
     },
     'drive.inspect'(_key, { action, magnet }, authorize) {
       authorize();
