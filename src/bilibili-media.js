@@ -106,8 +106,8 @@ async function trimCache(root, keep) {
 export async function readBilibiliMedia(reference, options = {}) {
   const media = options.media ?? {};
   const policy = videoPolicy(media);
-  const video = await readBilibili(reference, { ...options, maxVideoSeconds: policy.maxVideoSeconds, maxTextChars: policy.maxTextChars });
-  const blocked = video.watchBlockReason || videoDurationReason(video, policy);
+  const video = await readBilibili(reference, { ...options, maxVideoSeconds: options.watchApproved === true ? undefined : policy.maxVideoSeconds, maxTextChars: policy.maxTextChars });
+  const blocked = video.watchBlockReason || videoDurationReason(video, policy, options.watchApproved === true);
   if (blocked) return skippedVideo(blocked, policy, video.totalDuration ?? video.duration);
   const times = planFrameTimes(Number(video.duration), { ...options, frameCount: options.frameCount ?? policy.defaultFrameCount });
   video.frames = [];
@@ -115,10 +115,6 @@ export async function readBilibiliMedia(reference, options = {}) {
   video.transcriptStatus = video.subtitle ? 'subtitle-available' : 'unavailable';
   video.coverage = { kind: 'sampled-frames', startSeconds: times[0], endSeconds: times.at(-1),
     note: '抽样画面不等于逐秒观看。回答具体情节或比赛结果前，可指定相关时间段补看；不得编造未观测到的内容。' };
-  if (video.duration > 3600) {
-    video.limit = '视频超过当前 60 分钟处理上限，仅取得元数据和可用字幕。';
-    return video;
-  }
   const root = path.resolve(options.stateDir, 'bilibili-media');
   if (!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(video.bvid) || !Number.isSafeInteger(video.cid) || video.cid <= 0) throw new Error('B站视频标识无效');
   const dir = path.join(root, `${video.bvid}-${video.cid}`);

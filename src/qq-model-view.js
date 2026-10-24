@@ -8,37 +8,16 @@ const OPTIONAL_FIELDS = new Set([
   'ownerLabel', 'media', 'forwardIds', 'nestedForwardIds'
 ]);
 
-const VIDEO_LINK = /https?:\/\/(?:[\w-]+\.)*(?:bilibili\.com\/video\/|b23\.tv\/|bili2233\.cn\/)[^\s<>"'\]]*/gi;
-const VIDEO_ID = /\b(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9]\d{0,15})\b/gi;
-const VIDEO_CARD = /\[B站视频卡片(?:（[^）]*）)?\][^\r\n]*/g;
-const VIDEO_SKIPPED = '[视频已跳过：原消息未直接@机器人]';
-
-// Apply at both ingress and serialization: retained messages from older versions
-// must not leak card titles into a wake snapshot or a later read/wait tool result.
+const VIDEO_LINK = /https?:\/\/(?:[\w-]+\.)*(?:bilibili\.com\/video\/|b23\.tv\/|bili2233\.cn\/)[^\s<>"'\]]*/i;
+const VIDEO_ID = /\b(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9]\d{0,15})\b/i;
+// Sharing metadata is visible without a mention. It is never viewing evidence.
 export function videoMessageView(message) {
-  if (!message || message.isSelf || message.directAtSelf === true) return message;
+  if (!message || message.isSelf) return message;
   const source = ['text', 'plain', 'tail'].map(k => String(message[k] ?? '')).join('\n');
   const links = (message.sharedLinks ?? []).join('\n');
-  const strip = value => String(value).replace(VIDEO_CARD, VIDEO_SKIPPED)
-    .replace(VIDEO_LINK, VIDEO_SKIPPED).replace(VIDEO_ID, VIDEO_SKIPPED)
-    .replace(/\[视频\]/g, VIDEO_SKIPPED)
-    .replace(/(\[视频已跳过：原消息未直接@机器人\])(?:\s*\1)+/g, '$1');
-  if (strip(source + links) === source + links) return message;
-  const result = { ...message, directAtSelf: false,
-    videoWatch: { status: 'skipped', reason: 'mention_required' } };
-  for (const key of ['text', 'plain', 'tail']) {
-    if (typeof result[key] === 'string') result[key] = strip(result[key]);
-  }
-  // A truncated card's tail may start halfway through its title, without a marker.
-  if (/\[B站视频卡片/.test(source)) delete result.tail;
-  if (Array.isArray(result.sharedLinks)) result.sharedLinks = result.sharedLinks.filter(link => strip(link) === link);
-  return result;
-}
-
-export function blockedVideoOnly(message) {
-  const view = videoMessageView(message);
-  return view?.videoWatch?.reason === 'mention_required'
-    && !String(view.plain ?? view.text ?? '').split(VIDEO_SKIPPED).join('').trim();
+  if (!source.includes('[B站视频卡片') && !source.includes('[视频]')
+      && !VIDEO_LINK.test(source + links) && !VIDEO_ID.test(source + links)) return message;
+  return { ...message, videoWatch: { status: 'not-read', evidence: 'share-metadata-only' } };
 }
 
 function isRecord(value) {
