@@ -2173,6 +2173,20 @@ button:active:not(:disabled) {
       </div>
 
       </div></details>
+<details class="settings-group" id="v2PeakEconomyPanel"><summary>峰谷节流（峰时少聊，谷时恢复原设置）</summary><div class="settings-content">
+      <div class="meta">自动模式复用花费页的北京时间峰谷规则：工作日 9–12 / 14–18 点，法定节假日除外。只限制二代仿真的可选唤醒；私聊、@/引用机器人、拍一拍、首次初始化和手动唤醒保留。谷时仍遵守原有白名单、唤醒概率和发送限额。</div>
+      <div class="row">
+        <label for="v2PeakEnabled">启用峰谷节流</label><input type="checkbox" id="v2PeakEnabled" style="width:auto">
+        <label for="v2PeakMode">时段模式</label><select id="v2PeakMode"><option value="auto">自动按北京时间</option><option value="peak">强制峰时</option><option value="off">强制谷时</option></select>
+        <span class="meta" id="v2PeakStatus" aria-live="polite"></span>
+      </div>
+      <div class="row">
+        <label for="v2PeakProbability">峰时可选唤醒保留比例</label><input type="number" id="v2PeakProbability" min="0" max="1" step="0.05" style="width:90px">
+        <label for="v2PeakInterval">每群最短间隔（分钟）</label><input type="number" id="v2PeakInterval" min="0" max="1440" step="1" style="width:90px">
+        <label for="v2PeakReplyChars">闲聊建议字数</label><input type="number" id="v2PeakReplyChars" min="20" max="500" style="width:90px">
+      </div>
+      <div class="meta">默认保留 20%、间隔 15 分钟、建议 80 字。概率与间隔在调用模型前执行；被跳过的消息仍保留。字数是回复建议，具体问题仍可完整作答。中转平台时段不同时可强制切换。</div>
+      </div></details>
 <details class="settings-group"><summary>主动机会参数（proactive：群安静时 AI 主动冒泡）</summary><div class="settings-content">
       <div class="row">
         <label style="flex:1">启用主动机会</label><input type="checkbox" id="v2ProactiveEnabled" style="width:auto">
@@ -3268,6 +3282,13 @@ async function loadV2Config() {
   try {
     const r = await api('/api/socialV2/config');
     const c = r.config || {};
+    const peak = c.peakEconomy || {};
+    document.getElementById('v2PeakEnabled').checked = peak.enabled === true;
+    document.getElementById('v2PeakMode').value = peak.mode || 'auto';
+    document.getElementById('v2PeakProbability').value = peak.probability ?? 0.2;
+    document.getElementById('v2PeakInterval').value = (peak.minIntervalMs ?? 900000) / 60000;
+    document.getElementById('v2PeakReplyChars').value = peak.replyChars ?? 80;
+    document.getElementById('v2PeakStatus').textContent = peak.enabled !== true ? '节流未启用' : r.peakEconomyStatus ? (r.peakEconomyStatus.active ? '当前：峰时节流' : '当前：谷时原设置') : '按所选模式运行';
     document.getElementById('v2Enabled').checked = c.enabled !== false;
     document.getElementById('v2AgentPreset').value = c.agentPreset || '';
     document.getElementById('v2ProvideRecommendations').checked = c.provideRecommendations !== false;
@@ -3348,6 +3369,13 @@ async function saveV2Config() {
   const tools = {};
   document.querySelectorAll('[data-v2-tool]').forEach(el => { tools[el.dataset.v2Tool] = el.checked; });
   const body = {
+    peakEconomy: {
+      enabled: document.getElementById('v2PeakEnabled').checked,
+      mode: document.getElementById('v2PeakMode').value,
+      probability: Number(document.getElementById('v2PeakProbability').value),
+      minIntervalMs: Math.round(Number(document.getElementById('v2PeakInterval').value) * 60000),
+      replyChars: Number(document.getElementById('v2PeakReplyChars').value)
+    },
     enabled: document.getElementById('v2Enabled').checked,
     agentPreset: document.getElementById('v2AgentPreset').value.trim(),
     provideRecommendations: document.getElementById('v2ProvideRecommendations').checked,

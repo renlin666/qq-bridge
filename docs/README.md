@@ -2,6 +2,8 @@
 
 项目插件： [安装与开发](guides/PROJECT_PLUGINS.md) · [候选版本验证](guides/PLUGIN_RELEASE_VALIDATION.md) · [版本与回滚](../CHANGELOG.md)。
 
+最新设置：[峰谷节流与旧记忆索引](guides/PEAK_ECONOMY_AND_MEMORY.md)。
+
 > 根目录只留 `README.md` / `README.en.md` / `RULES.md` 三个文档，其余全部在本目录下。
 > 仓库目录结构与 `scripts/` 命名约定见 **[FOLDER_MAP.md](FOLDER_MAP.md)**。
 >

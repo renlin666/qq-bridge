@@ -177,6 +177,14 @@ try {
     await fill('v2AutoReplyCheckSec', 17);
     await fill('v2WaitDefaultQuietMs', 0);
     await fill('v2MaxSendMin', 0);
+    if (!original) {
+      await check('v2PeakEnabled', true);
+      await reveal('#v2PeakMode');
+      await page.locator('#v2PeakMode').selectOption('peak');
+      await fill('v2PeakProbability', 0);
+      await fill('v2PeakInterval', 17);
+      await fill('v2PeakReplyChars', 60);
+    }
     await check('v2ProvideRecommendations', false);
     const firstTool = page.locator('[data-v2-tool]').first();
     await reveal('[data-v2-tool]');
@@ -190,6 +198,8 @@ try {
     assert.equal(body.autoReplyCheckMs, 17000);
     assert.equal(body.wait.defaultQuietMs, 0);
     assert.equal(body.send.maxSendPerMinute, 0);
+    if (!original) assert.equal(body.tools.sendVoice, true, '新增工具开关也必须随完整表单保存');
+    if (!original) assert.deepEqual(body.peakEconomy, { enabled: true, mode: 'peak', probability: 0, minIntervalMs: 1020000, replyChars: 60 });
     assert.equal(body.provideRecommendations, false);
     assert.equal(body.tools[await firstTool.getAttribute('data-v2-tool')], false);
     // The lower save button must submit the same complete configuration.
@@ -248,9 +258,16 @@ try {
     assert(results.every(x => x.ok), 'Cannot record a baseline from a failed suite');
     await writeFile(baselinePath, JSON.stringify(fixture.requests, null, 2) + '\n');
     console.log(`Recorded original API contracts: ${baselinePath}`);
-  } else await test('All submitted payloads exactly match the pre-redesign console baseline', async () => {
+  } else await test('Existing settings retain the pre-redesign baseline; new peak settings are checked separately', async () => {
     const expected = JSON.parse(await readFile(baselinePath, 'utf8'));
-    assert.deepEqual(fixture.requests, expected);
+    const existing = fixture.requests.filter(request => !(request.path === '/api/security'
+      && request.body.rehardenStateDir === true && Object.keys(request.body).length === 1)).map(request => {
+      if (request.path !== '/api/socialV2/config') return request;
+      const { peakEconomy, ...body } = request.body;
+      const { sendVoice, ...tools } = body.tools;
+      return { ...request, body: { ...body, tools } };
+    });
+    assert.deepEqual(existing, expected);
   });
 
   if (!original) await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {
@@ -553,6 +570,19 @@ try {
 
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
+    if (!original) {
+      await reveal('#v2PeakEconomyPanel');
+      if (await page.locator('#v2PeakEconomyPanel').getAttribute('open') === null) await page.locator('#v2PeakEconomyPanel > summary').click();
+      await page.locator('#v2PeakEconomyPanel').scrollIntoViewIfNeeded();
+      await page.locator('#v2PeakEconomyPanel').screenshot({ path: resolve(artifacts, 'peak-economy-desktop.png') });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await reveal('#v2PeakEconomyPanel');
+      if (await page.locator('#v2PeakEconomyPanel').getAttribute('open') === null) await page.locator('#v2PeakEconomyPanel > summary').click();
+      await test('Peak economy settings fit a mobile viewport', async () => {
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      });
+      await page.locator('#v2PeakEconomyPanel').screenshot({ path: resolve(artifacts, 'peak-economy-mobile.png') });
+    }
     await page.setViewportSize({ width: 1440, height: 1000 });
     for (const view of original ? ['overview'] : ['overview', 'persona', 'social-v2', 'slang', 'access']) {
       await navigate(view);

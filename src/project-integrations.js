@@ -9,6 +9,7 @@ import { createPluginHost } from './plugin-host/index.js';
 import { extensionConfig, extensionEnabled } from './plugin-host/catalog.js';
 import { biliReferences } from './bilibili.js';
 import { videoPolicy, videoDurationReason, skippedVideo } from './video-watch-policy.js';
+import { legacyMemoryEntries } from './legacy-memory-source.js';
 
 export const INTEGRATION_PREFIX = '/api/socialV2/integrations/';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -17,6 +18,7 @@ const fail = (message, statusCode = 400) => { throw Object.assign(new Error(mess
 // Core adapters retain the existing transport, scoped reads and publication ledgers.
 // Feature selection, schemas and tool registration belong to the project extensions.
 export function createIntegrations({ stateDir, getConfig, onebot, getConversation, sessionAllowed, tokenOk, socialHub,
+  getConversations = () => [], getSelfId = () => '',
   readMessageImages, readSelfImage, validateImage, notifyQzone = async () => {}, fetchImage = safeFetchBuffer,
   readVideo = readBilibiliMedia, readMagnet = inspectMagnet, driveStatus = quarkStatus,
   projectRoot = ROOT, localRoot, backgroundAllowed = () => true, log = () => {} }) {
@@ -45,12 +47,20 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
   }
   const host = createPluginHost({ root: projectRoot, localRoot, stateDir, getConfig, log, services: {
     readMessage,
+    'memory.legacy'(key, _args, authorize) {
+      authorize();
+      const read = scope => getConfig().socialV2?.tools?.memory === false ? []
+        : legacyMemoryEntries(getConversation(scope), socialHub?.query(scope) ?? []);
+      if (key) return read(key);
+      return { botAccountId: String(getSelfId() || ''), scopes: [...getConversations()]
+        .filter(([scope]) => sessionAllowed(scope)).map(([scope]) => ({ key: scope, entries: read(scope) })) };
+    },
     'memory.policy'(_key, _args, authorize) {
       authorize();
       const cfg = getConfig();
       const extra = extensionConfig('social-memory', cfg);
       return { people: [...new Set([...(cfg.allow?.private ?? []), ...(extra.people ?? []), cfg.ownerQQ].filter(Boolean).map(String))],
-        groups: (cfg.allow?.groups ?? []).map(String) };
+        groups: (cfg.allow?.groups ?? []).map(String), minimumTiers: extra.minimumTiers ?? {} };
     },
     sendMessage(key, messages, requestId, authorize) {
       if (!socialHub) fail('发送服务未就绪', 503);

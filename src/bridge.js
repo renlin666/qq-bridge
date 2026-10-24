@@ -27,6 +27,7 @@ import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } fro
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import { resolvePriceTable } from './model-prices.js';
+import { peakEconomyConfig, validatePeakEconomy, peakEconomyStatus, decidePeakWake } from './peak-economy.js';
 import { createTokenLedger } from './token-ledger.js';
 import { cardToText, expandCqCards, extractSharedLinks } from './bilibili.js';
 import { directlyMentionsBot } from './video-watch-policy.js';
@@ -760,6 +761,7 @@ function loadConfig() {
     },
     socialV2: {
       enabled: true,
+      peakEconomy: peakEconomyConfig(file.socialV2?.peakEconomy),
       autoReplyCheckMs: 30000,
       agentPreset: 'qq-chat-v2',
       provideRecommendations: true,
@@ -2578,7 +2580,7 @@ async function main() {
         items.shift();
         log(`队列满（${QUEUE_MAX}），丢弃最旧消息 (${key})`);
       }
-      items.push({ promptText, farewell: !!opts.farewell, silent: !!opts.silent, media: opts.media ?? [], wakeReason: opts.wakeReason });
+      items.push({ promptText, farewell: !!opts.farewell, silent: !!opts.silent, media: opts.media ?? [], wakeReason: opts.wakeReason, wakeTime: opts.wakeTime });
       queued.set(key, items);
     }
     queueRetries.delete(key); // 新消息入队视为新的机会，重置退避计数
@@ -2832,7 +2834,7 @@ async function main() {
               log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
               continue;
             }
-            const result = await deliverPrompt(key, item.promptText, { farewell: item.farewell, silent: item.silent, media: item.media ?? [], wakeReason: item.wakeReason });
+            const result = await deliverPrompt(key, item.promptText, { farewell: item.farewell, silent: item.silent, media: item.media ?? [], wakeReason: item.wakeReason, wakeTime: item.wakeTime });
             if (!result.ok) {
               log(`补投失败 ${key}: ${result.error || '未知错误'}`);
               failed += 1;
@@ -3165,6 +3167,7 @@ async function main() {
       backgroundAllowed: () => currentMode === 'reserved2' && !socialV2.paused && cfg.socialV2?.enabled !== false,
       onebot: (action, params) => bot.raw(action, params),
       getConversation: key => socialV2.conversations.get(key),
+      getConversations: () => socialV2.conversations, getSelfId: () => selfUserId,
       sessionAllowed: v2SessionAllowed, tokenOk: agentTokenOk, socialHub,
       validateImage: acceptImageBuffer,
       readSelfImage: async () => fs.readFileSync(path.join(ROOT, 'assets', 'deepseek娘.png')),
@@ -4458,7 +4461,7 @@ async function main() {
         }
         // ── 二代仿真模式（reserved2）内部 Agent API ─────────────────────────
         if (req.method === 'GET' && url.pathname === '/api/socialV2/config') {
-          sendJson({ ok: true, config: cfg.socialV2 ?? {} });
+          sendJson({ ok: true, config: cfg.socialV2 ?? {}, peakEconomyStatus: peakEconomyStatus(cfg.socialV2?.peakEconomy, Date.now(), priceTable) });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/config') {
@@ -4479,6 +4482,7 @@ async function main() {
             : null;
           const current = fileV2 ?? ((cfg.socialV2 && typeof cfg.socialV2 === 'object') ? cfg.socialV2 : {});
           const merged = { ...current, ...body };
+          if (body.peakEconomy !== undefined) merged.peakEconomy = validatePeakEconomy(body.peakEconomy, cfg.socialV2?.peakEconomy);
           // 子对象必须是非 null 对象；null/数组/基本类型会覆盖默认值导致工具开关被绕过，这里直接保留当前值。
           for (const sub of ['tools', 'wake', 'send', 'wait', 'proactive', 'sticker', 'feedback', 'context']) {
             if (body[sub] !== undefined && (body[sub] === null || typeof body[sub] !== 'object' || Array.isArray(body[sub]))) {
@@ -4787,7 +4791,9 @@ async function main() {
             recentCount: st.recentMessages.length,
             currentWakeConfig: st.wakeConfig,
             wakeSafety: computeWakeSafetyV2(st.wakeConfig),
-            memory: [formatMemoryV2(st), socialHub.format(key)].filter(Boolean).join('\n\n'),
+            memory: cfg.extensions?.['social-memory']?.enabled === true
+              ? await extensionContextFor?.(key) || '本地记忆：qq_social_memory_query 查关键词，qq_social_memory_read 按编号读正文。'
+              : [formatMemoryV2(st), socialHub.format(key)].filter(Boolean).join('\n\n'),
             handoffs: socialHub.inbox(key),
             participation: formatParticipationV2(st),
             slang: {
@@ -8534,6 +8540,7 @@ async function main() {
         unread: [],
         lastWakeReason: '',
         lastAiReplyAt: 0,
+        lastEconomyWakeAt: 0,
         lastActionAt: 0,
         agentToken: crypto.randomBytes(16).toString('hex'),
         bootstrapSent: false,
@@ -8603,6 +8610,7 @@ async function main() {
             unread: Array.isArray(val.unread) ? val.unread : [],
             lastWakeReason: String(val.lastWakeReason ?? ''),
             lastAiReplyAt: Number(val.lastAiReplyAt) || 0,
+            lastEconomyWakeAt: Number(val.lastEconomyWakeAt) || 0,
             lastActionAt: Number(val.lastActionAt) || 0,
             agentToken,
             bootstrapSent: !!val.bootstrapSent,
@@ -8698,6 +8706,7 @@ async function main() {
           unread: st.unread.slice(-100),
           lastWakeReason: st.lastWakeReason,
           lastAiReplyAt: st.lastAiReplyAt,
+          lastEconomyWakeAt: st.lastEconomyWakeAt || 0,
           lastActionAt: st.lastActionAt,
           agentToken: st.agentToken,
           bootstrapSent: st.bootstrapSent,
@@ -8897,6 +8906,9 @@ async function main() {
       hint = '群聊有点冷，不要一个人撑场；但有想法时仍可主动抛一句。';
     } else if (aiCount <= 1 && otherCount >= 10) {
       hint = '这轮可以简短接一句，别潜水；挑一个点参与。';
+    }
+    if (peakEconomyStatus(cfg.socialV2?.peakEconomy, now, priceTable).active) {
+      hint = '峰时以简短必要回复为主，不为保持活跃而搭话；明确找你时正常回应，具体问题完整作答。';
     }
     const burstText = fiveMinOthers.length ? `；近5分钟群聊 ${fiveMinOthers.length} 条${activeSenders ? `/${activeSenders}人` : ''}` : '';
     return `【参与度参考】你最近 1 小时发言 ${aiCount} 次，群友发言 ${otherCount} 条${burstText}。${hint}`;
@@ -9241,9 +9253,32 @@ async function main() {
         items.shift();
         log(`队列满（${QUEUE_MAX}），丢弃最旧消息 (${key})`);
       }
-      items.push({ promptText, farewell: !!opts.farewell, silent: !!opts.silent, media: opts.media ?? [], wakeReason: opts.wakeReason });
+      items.push({ promptText, farewell: !!opts.farewell, silent: !!opts.silent, media: opts.media ?? [], wakeReason: opts.wakeReason, wakeTime: opts.wakeTime });
       queued.set(key, items);
       return { ok: true, queued: true };
+    }
+    let economyDecision;
+    if (opts.wakeReason) {
+      const st = getSocialV2State(key);
+      economyDecision = decidePeakWake({ key, reason: opts.wakeReason, unread: st.unread,
+        lastAcceptedAt: st.lastEconomyWakeAt, config: cfg.socialV2?.peakEconomy, table: priceTable });
+      if (!economyDecision.allowed) {
+        pendingWakeKeys.delete(key);
+        disarmPendingWakeLease(key);
+        const wakeIndex = st.wakeTimes.lastIndexOf(opts.wakeTime);
+        if (wakeIndex >= 0) {
+          st.wakeTimes.splice(wakeIndex, 1);
+          st.wakeConfig.wakeCount = Math.max(0, (st.wakeConfig.wakeCount || 0) - 1);
+        }
+        // Preserve finite sleepers without acknowledgement or a tight retry loop.
+        if (!st.wakeConfig.infinite) {
+          st.wakeConfig.sleepUntil = new Date(Date.now() + Math.max(60000, economyDecision.retryAfterMs)).toISOString();
+          setupSleepTimerV2(key);
+        }
+        saveSocialV2State();
+        log(`[reserved2] 峰时节流，跳过可选唤醒 ${key}（${opts.wakeReason} / ${economyDecision.reason}）`);
+        return { ok: true, skipped: true, peakEconomy: true };
+      }
     }
     let sessionId;
     try {
@@ -9296,6 +9331,10 @@ async function main() {
       const safeErrText = shouldAuditKey(key) && SENSITIVE_RE.test(errText) ? '（含敏感信息，已隐藏）' : errText;
       if (!opts.silent) await sendToQQ(key, `⚠️ 消息未被接受：${safeErrText}`);
       return { ok: false, error: safeErrText };
+    }
+    if (economyDecision?.active && key.startsWith('group:') && isCurrentSession(key, sessionId)) {
+      getSocialV2State(key).lastEconomyWakeAt = Date.now();
+      saveSocialV2State();
     }
     if (wakeSnapshot && isCurrentSession(key, sessionId)
         && socialV2.conversations.get(canonicalV2Key(key)) === wakeState
@@ -10324,7 +10363,8 @@ async function main() {
     const identityLine = selfIdentityTextV2();
     const st = getSocialV2State(key);
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
-    const memoryText = [formatMemoryV2(st), socialHub.format(key)].filter(Boolean).join('\n\n');
+    const memoryText = cfg.extensions?.['social-memory']?.enabled === true ? ''
+      : [formatMemoryV2(st), socialHub.format(key)].filter(Boolean).join('\n\n');
     const memoryLine = memoryText ? `${truncateText(memoryText, 1200)}\n\n` : '';
     // 注意：黑话表不在这里注入，deliverPromptNow 的 withSlangContext 会统一注入，
     // 避免唤醒 prompt 出现两份黑话表。
@@ -10336,7 +10376,10 @@ async function main() {
       ? `${buildStickerStrategyHint()}\n${buildStickerContext(stickerEntries, stickerCfg.promptMaxStickers ?? 8)}\n\n`
       : '';
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
-    const proactiveLine = '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
+    const economy = peakEconomyStatus(cfg.socialV2?.peakEconomy, Date.now(), priceTable);
+    const proactiveLine = economy.active
+      ? `【峰时节流】减少可选闲聊、主动搭话和无必要的搜索；闲聊尽量一条、约${economy.replyChars}字内，不拆成多条。有明确@或私聊时正常响应，具体问题仍完整作答；没必要接话可潜水。\n\n`
+      : '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
     const replyTiming = replyTimingV2(st);
     const replyLine = `【首回复节奏】先处理已有消息，完整的问题及时回答。需要确认对方是否继续补充时，用 qq_wait_for_messages(purpose="reply", quietMs=${replyTiming.quietMs})；从最后来信计时，合批和读提示词的耗时也算，目前还差约 ${Math.ceil(replyTiming.remainingQuietMs / 1000)} 秒静默。已安静够久可直接回，工具也会立即返回并补上思考期间的新消息。只有明确没说完、你确实要等下文时，才用普通 messages 长等待。\n\n`;
     const preSleepLine = `【沉睡前强制等待】这是决定潜水收尾时的步骤，不是首回复的前置条件。除非对方明确说“不聊了/晚安/下了/拜拜”等结束语，否则每次设置潜水/下一次唤醒前，必须先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成一次沉睡前观察；回复前 purpose="reply" 的短静默不能代替这次完整观察。若 ${Math.round(preSleepMs / 60000)} 分钟内没人说话，返回 preSleepWaitSatisfied=true，可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看返回的 newMessages——判断不需要你参与就可以直接沉睡，若你选择参与回复，则下次想睡时需要重新等待观察窗口。如果返回里带 preSleepWaitRemainingMs，就按剩余时间继续等待。\n\n`;
@@ -10490,7 +10533,7 @@ async function main() {
     try {
       pendingWakeKeys.add(key);
       armPendingWakeLease(key);
-      const result = await deliverPrompt(key, promptText, { wakeReason: reason });
+      const result = await deliverPrompt(key, promptText, { wakeReason: reason, wakeTime });
       const restoreFiniteSleep = () => {
         if (hadFiniteSleep) {
           st.wakeConfig.sleepUntil = prevSleepUntil;
