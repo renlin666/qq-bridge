@@ -2,11 +2,13 @@ import path from 'node:path';
 import { createSocialMemory, createWhitelistPolicy } from '../../lib/social-memory/src/index.js';
 import { PersistentIndexAdapter } from './persistent-index.js';
 import { LegacyMemoryStore, indexMatches } from './legacy-store.js';
+import { createReactions, TRANSIENT_KINDS } from './reactions.js';
 
 export async function activate(ctx) {
   const policy = createWhitelistPolicy();
   const adapter = new PersistentIndexAdapter(path.join(ctx.dataDirectory, 'keyword-index.db'));
   const legacy = new LegacyMemoryStore(ctx.dataDirectory);
+  const reactions = createReactions(ctx.storage);
   let minimumTiers = {};
   const service = createSocialMemory({ dbPath: path.join(ctx.dataDirectory, 'memory.db'), policy, adapter,
     relationshipPolicy: ({ userId }) => ({ minimumTier: minimumTiers[userId] }),
@@ -52,13 +54,15 @@ export async function activate(ctx) {
   });
   ctx.context.register(async (message, call) => {
     const query = message.query || '';
-    const old = await legacyFor(message, call, query);
+    const old = message.attitudeOnly ? [] : await legacyFor(message, call, query);
     const pack = await optionalPack(message, call, query, 800);
     if (!pack?.personId && !old.length) return '';
     const hints = { userId: String(message.userId),
       ...(pack?.attitude ? { attitude: pack.attitude } : { tier: pack?.relationship?.tier }), indexes: [] };
+    const reaction = pack?.personId ? reactions.get(String(message.botAccountId), call.key, String(message.userId)) : null;
+    if (reaction) hints.reaction = reaction;
     // Upstream receives only references/keywords. Bodies require a scoped read.
-    const indexes = [...(pack?.items ?? []).map(item => adapter.get(item.memoryId)).filter(index => index && indexMatches(index, query)), ...old];
+    const indexes = message.attitudeOnly ? [] : [...(pack?.items ?? []).map(item => adapter.get(item.memoryId)).filter(index => index && indexMatches(index, query)), ...old];
     for (const index of indexes) {
       const entry = { memoryId: index.memoryId, keywords: index.keywords.slice(0, 6), ...(index.origin ? { origin: index.origin, identityBound: false } : {}) };
       hints.indexes.push(entry);
@@ -103,8 +107,17 @@ export async function activate(ctx) {
     const { message, trusted } = await bound(args, call);
     const text = String(message.plain ?? message.text ?? '');
     if (!args.evidence || !text.includes(args.evidence)) throw new Error('关系事件证据必须出自该条真实消息');
-    return service.recordInteraction(trusted, { kind: args.kind, evidence: args.evidence,
+    const source = String(message.messageId ?? message.seq);
+    if (TRANSIENT_KINDS.has(args.kind)) {
+      service.getRelationship(trusted); // Enforce the refreshed person whitelist for transient-only writes too.
+      call.assertAuthorized();
+      return { ...reactions.record(String(message.botAccountId), call.key, String(message.userId), source, args.kind),
+        transient: true, note: '只改变当前会话对此人的临时反应，不改变长期好感度。' };
+    }
+    const result = service.recordInteraction(trusted, { kind: args.kind, evidence: args.evidence,
       sourceMessageId: String(message.messageId ?? message.seq), memoryId: args.memoryId });
+    if (!result.duplicate) reactions.record(String(message.botAccountId), call.key, String(message.userId), source, args.kind);
+    return result;
   });
   ctx.scheduler.every(60000, async () => {
     await refreshPolicy(); await service.syncOutbox();

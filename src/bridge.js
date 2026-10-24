@@ -10424,7 +10424,7 @@ async function main() {
     // 避免唤醒 prompt 出现两份黑话表。
     const participationText = formatParticipationV2(st);
     const participationLine = participationText ? `${participationText}\n\n` : '';
-    const antiAiLine = '【风格】自然闲聊，不必有求必应；少用客服口吻和绝对化推荐。\n\n';
+    const antiAiLine = '【风格】按真实QQ号区分相处方式。接梗时沿当前设定补一个细节、反转或反将一军，不解释笑点、不只复述叫好。熟人可互损、嘴硬、怼一句后收住；高好感不等于讨好。冒犯时可不悦，对方认真/不舒服就停，善意和解后缓和；别随机发火或编共同经历。明显玩闹/不耐烦/和解/转认真，可用qq_social_relationship_event的banter/annoyed/repair/serious记录临时反应并附原消息证据，不用每句记账。reaction只影响当前人当前会话；当下语境优先，情绪过期不硬演。\n\n';
     const stickerCfg = cfg.socialV2?.sticker ?? {};
     const stickerLine = stickerCfg.enabled !== false && stickerCfg.includeInPrompt !== false
       ? `${buildStickerStrategyHint()}\n${buildStickerContext(stickerEntries, stickerCfg.promptMaxStickers ?? 8)}\n\n`
