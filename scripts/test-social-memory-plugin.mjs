@@ -8,7 +8,7 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 test('正式内置记忆插件：真实来源绑定、持久关键词索引、上下文、撤销和重启删除', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-social-memory-'));
-  const cfg = { allow: { private: ['789'], groups: ['456'] }, extensions: { 'social-memory': { enabled: true } } };
+  const cfg = { allow: { private: ['789'], groups: ['456'] }, extensions: { 'social-memory': { enabled: true, config: { minimumTiers: { '789': '亲近' } } } } };
   const message = { messageId: 'source-1', botAccountId: '10001', userId: '789', sender: '虚构人物',
     text: '我喜欢乌龙茶', plain: '我喜欢乌龙茶' };
   const options = { stateDir: dir, getConfig: () => cfg, getConversation: () => ({ recentMessages: [message] }),
@@ -30,6 +30,7 @@ test('正式内置记忆插件：真实来源绑定、持久关键词索引、�
   assert.equal((await call('qq_social_memory_read', { memoryId: memory.memoryId })).content, '喜欢乌龙茶');
   const first = await call('qq_social_relationship_event', { kind: 'support', evidence: '喜欢乌龙茶' });
   assert.equal(first.applied, true);
+  assert.equal(first.relationship.tier, '亲近');
   const replay = await call('qq_social_relationship_event', { kind: 'positive_chat', evidence: '喜欢乌龙茶' });
   assert.equal(replay.duplicate, true);
   await assert.rejects(call('qq_social_relationship_event', { kind: 'support', evidence: '虚构消息里没有这句话' }), /证据/);
@@ -62,7 +63,7 @@ test('真实唤醒链路注入关键词，等待上下文期间不会重复投�
   if (!server.listening) await new Promise(resolve => server.once('listening', resolve));
   try {
     h.setMode('reserved2'); h.setSelfIdentity('fixture', '10001');
-    h.appendSocialV2Message('group:456', 'fixture', '你好', '你好', false, false, 'source-1', [], '123', [], false, '10001');
+    h.appendSocialV2Message('group:456', 'fixture', '铁观音是什么茶', '铁观音是什么茶', false, false, 'source-1', [], '123', [], false, '10001');
     await integration.ready;
     await integration.host.callTool('qq_social_memory_remember', { messageId: 'source-1', content: '喜欢铁观音', confirmed: true },
       { key: 'group:456', assertAuthorized() {} });
@@ -79,4 +80,50 @@ test('真实唤醒链路注入关键词，等待上下文期间不会重复投�
   } finally {
     release(); await new Promise(resolve => server.close(resolve)); await h.close();
   }
+});
+
+test('旧记忆按会话持久化为关键词索引，正文按需读取；不同群和删除源记录均不可绕过', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-legacy-memory-'));
+  const cfg = { allow: { private: ['789'], groups: ['456', '999'] }, extensions: { 'social-memory': { enabled: true } } };
+  const message = { messageId: 'source-1', botAccountId: '10001', userId: '789', plain: '桂花乌龙茶' };
+  const state = { recentMessages: [message], activeTopics: [{ text: '周末参观机器人展' }],
+    memberImpressions: { '可能同名的人': { traits: ['喜欢桂花乌龙茶'] } } };
+  const integration = createIntegrations({ stateDir: dir, getConfig: () => cfg,
+    getConversation: key => key === 'group:456' ? state : { recentMessages: [message] },
+    sessionAllowed: key => cfg.allow.groups.includes(key.slice(6)), tokenOk: () => true });
+  t.after(async () => { await integration.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const call = async (name, args, key = 'group:456') => JSON.parse((await integration.host.callTool(name,
+    { messageId: 'source-1', ...args }, { key, assertAuthorized() { assert.ok(cfg.allow.groups.includes(key.slice(6))); } })).content[0].text);
+  const result = await call('qq_social_memory_query', { query: '桂花乌龙茶' });
+  assert.equal(result.indexes.length, 1);
+  const index = result.indexes[0];
+  assert.equal(index.identityBound, false);
+  assert.equal(index.content, undefined);
+  assert.ok(fs.existsSync(path.join(dir, 'extensions/social-memory/legacy-memory.db')));
+  const injected = await integration.contextFor('group:456');
+  assert.match(injected, /legacy:/);
+  assert.ok(!injected.includes('喜欢桂花乌龙茶'));
+  assert.equal((await call('qq_social_memory_read', { memoryId: index.memoryId })).content, '可能同名的人：喜欢桂花乌龙茶');
+  assert.equal((await call('qq_social_memory_query', { query: '毫不相关的天气' })).indexes.length, 0);
+  await assert.rejects(call('qq_social_memory_read', { memoryId: index.memoryId }, 'group:999'), /不在当前会话/);
+  state.memberImpressions = {};
+  await assert.rejects(call('qq_social_memory_read', { memoryId: index.memoryId }), /移除/);
+});
+
+test('唤醒与get_prompt不再直塞旧摘要，关键词入口可读取旧资料', async () => {
+  const h = await bridgeHarness({ config: { extensions: { 'social-memory': { enabled: true } } } });
+  const server = h.startConsoleServer();
+  if (!server.listening) await new Promise(resolve => server.once('listening', resolve));
+  try {
+    h.setMode('reserved2'); h.setSelfIdentity('fixture', '10001');
+    h.appendSocialV2Message('group:456', 'fixture', '机器人展', '机器人展', false, false, 'legacy-source', [], '123', [], false, '10001');
+    h.getSocialV2State('group:456').activeTopics = [{ text: '周末一起参观机器人展并拍照' }];
+    assert.ok(!h.buildWakePromptV2('group:456', 'admin').includes('周末一起参观机器人展并拍照'));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/socialV2/prompt?key=group:456`,
+      { headers: { 'x-console-token': 'fixture-console-token' } });
+    const prompt = await response.text();
+    assert.equal(response.status, 200, prompt);
+    assert.ok(!prompt.includes('周末一起参观机器人展并拍照'));
+    assert.match(prompt, /legacy:/);
+  } finally { await new Promise(resolve => server.close(resolve)); await h.close(); }
 });

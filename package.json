@@ -1,6 +1,6 @@
 {
   "name": "qq-bridge",
-  "version": "0.3.0-rc.2",
+  "version": "0.3.0-rc.3",
   "private": true,
   "license": "MIT",
   "description": "Bridge between SnowLuma (OneBot v11 / QQ) and DeepSeek Harness Web API: QQ messages become DSH agent prompts, agent replies go back to QQ. Targets the DSH Cookie-auth / slash-RPC / remote.mux protocol generation, so it deliberately names no DSH version here.",
@@ -9,7 +9,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "test": "node --test scripts/test-project-plugins.mjs scripts/test-release-workflow.mjs scripts/test-integrations.mjs scripts/test-bilibili-media.mjs scripts/test-social-extensions.mjs scripts/test-image-search.mjs scripts/test-contact-delivery.mjs scripts/test-native-memory-policy.mjs scripts/test-output-continuation.mjs scripts/test-exclusive-model.mjs scripts/test-video-policy.mjs scripts/test-social-memory-plugin.mjs lib/social-memory/test/*.test.js lib/social-memory/review/regression-probes.mjs",
+    "test": "node --test scripts/test-peak-economy.mjs scripts/test-project-plugins.mjs scripts/test-release-workflow.mjs scripts/test-integrations.mjs scripts/test-bilibili-media.mjs scripts/test-social-extensions.mjs scripts/test-image-search.mjs scripts/test-contact-delivery.mjs scripts/test-native-memory-policy.mjs scripts/test-output-continuation.mjs scripts/test-exclusive-model.mjs scripts/test-video-policy.mjs scripts/test-social-memory-plugin.mjs lib/social-memory/test/*.test.js lib/social-memory/review/regression-probes.mjs",
     "test:extensions": "node --test scripts/test-project-plugins.mjs",
     "release:check": "node scripts/release-check.mjs",
     "test:continuation": "node --test scripts/test-output-continuation.mjs",

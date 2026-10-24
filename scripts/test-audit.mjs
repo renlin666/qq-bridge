@@ -16,6 +16,7 @@ const tests = [
   'test-output-continuation.mjs',
   'test-exclusive-model.mjs',
   'test-video-policy.mjs', 'test-social-memory-plugin.mjs',
+  'test-peak-economy.mjs',
   'test-audit-setup.mjs', 'test-audit-setup-guards.mjs',
   // DSH 会话队列（inbox 投影）解析：0.2.0 把队列从 control baseline 的
   // `value.queues[<id>]` 挪进了 `value.projections[<id>].values.inbox`。

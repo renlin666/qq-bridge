@@ -1,6 +1,8 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-> **本分支：0.3.0-rc.2 · 项目自身的功能插件 API v1**。新增本地人物记忆与独立关系系统、视频实际 @ / 5 分钟门槛和提示词精简。配置、验证及备份方法见 [本次接入说明](docs/guides/SOCIAL_MEMORY_RELEASE.md)。安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)，版本变更见 [CHANGELOG](CHANGELOG.md)，来源和上游关系见 [UPSTREAM](UPSTREAM.md)。下文保留原项目的安装与协议说明，其中原版本号指上游基线。
+> **0.3.0-rc.3**：新增可调整的峰谷节流、旧记忆关键词入口和个人关系档位保底，见 [设置与验证说明](docs/guides/PEAK_ECONOMY_AND_MEMORY.md)。
+
+> **本分支：0.3.0-rc.3 · 项目自身的功能插件 API v1**。已接入本地人物记忆与独立关系系统、视频实际 @ / 5 分钟门槛和提示词精简。早期接入及备份方法见 [接入说明](docs/guides/SOCIAL_MEMORY_RELEASE.md)。安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)，版本变更见 [CHANGELOG](CHANGELOG.md)，来源和上游关系见 [UPSTREAM](UPSTREAM.md)。下文保留原项目的安装与协议说明，其中原版本号指上游基线。
 >
 > 本机自定义角色、配置和运行数据不发布。需要示例人格卡时，可将 `examples/roles/小鲸鱼.md` 复制到 `roles/小鲸鱼.md` 后自行编辑。
 

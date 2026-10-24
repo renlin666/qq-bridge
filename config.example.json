@@ -107,6 +107,13 @@
   },
   "socialV2": {
     "enabled": true,
+    "peakEconomy": {
+      "enabled": false,
+      "mode": "auto",
+      "probability": 0.2,
+      "minIntervalMs": 900000,
+      "replyChars": 80
+    },
     "autoReplyCheckMs": 30000,
     "agentPreset": "qq-chat-v2",
     "provideRecommendations": true,
