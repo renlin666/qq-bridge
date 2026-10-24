@@ -9953,7 +9953,7 @@ async function main() {
   }
 
   // ── 二代仿真模式（reserved2）唤醒调度 ──────────────────────────────────
-  function appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, messageId, media = [], userId = null, forwardIds = [], directAtSelf = false, botAccountId = selfUserId, replyToMessageId = null) {
+  function appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, messageId, media = [], userId = null, forwardIds = [], directAtSelf = false, botAccountId = selfUserId, replyToMessageId = null, approvalText = null) {
     const st = getSocialV2State(key);
     const recentLimit = Number(cfg.socialV2?.context?.recentLimit) || 100;
     const unreadLimit = Number(cfg.socialV2?.context?.unreadLimit) || 30;
@@ -10001,6 +10001,7 @@ async function main() {
       sharedLinks: extractSharedLinks(String(plainContent ?? textContent)),
       directAtSelf: directAtSelf === true,
       ...(replyToMessageId != null ? { replyToMessageId: String(replyToMessageId) } : {}),
+      ...(approvalText != null && /^允许观看视频(?:\s+-?\d+)?[。！!]?\s*$/.test(approvalText) ? { approvalText } : {}),
       botAccountId: String(botAccountId || ''),
       quoteTargetIsSelf: !!quoteTargetIsSelf,
       isOwner: !!isOwner,
@@ -11068,7 +11069,8 @@ async function main() {
     if (currentMode === 'reserved2') {
       const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
       appendSocialV2Message(key, sender, rawTextContent, rawPlainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, extractForwardIds(event.message ?? []), directlyMentionsBot(event, selfUserId), event.self_id || selfUserId,
-        Array.isArray(event.message) ? event.message.find(segment => segment?.type === 'reply')?.data?.id ?? null : null);
+        Array.isArray(event.message) ? event.message.find(segment => segment?.type === 'reply')?.data?.id ?? null : null,
+        Array.isArray(event.message) ? event.message.filter(segment => segment?.type === 'text').map(segment => String(segment.data?.text ?? '')).join('').trim() : null);
       // 二代同样收集群聊黑话学习素材（AI 自主提交之外，桥接仍自动提取高频陌生词）
       if (kind === 'group') feedSlangWindow(key, sender, plainContent);
       if (socialV2.paused) {
