@@ -1774,6 +1774,7 @@ button:active:not(:disabled) {
       <div class="nav-label">管理</div>
       <a href="/extensions" id="extensionsOpen" class="nav-item">功能插件</a>
       <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true">◧</span>令牌与花费</button>
+      <a href="/billing" id="billingDirect" class="nav-item" style="text-decoration:none" rel="noreferrer">账单记录 · 独立页</a>
       <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true">⊙</span>访问与安全</button>
       <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
       <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true">ⓘ</span>工具参考</button>
@@ -2654,32 +2655,48 @@ button:active:not(:disabled) {
   <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>
 
 <script>
+let consoleTokenMemory = '';
+try { consoleTokenMemory = localStorage.getItem('consoleToken') || ''; } catch {}
+function saveConsoleToken(value) {
+  consoleTokenMemory = value || '';
+  try {
+    if (consoleTokenMemory) localStorage.setItem('consoleToken', consoleTokenMemory);
+    else localStorage.removeItem('consoleToken');
+  } catch {} // 浏览器禁用存储时仍可用本页内存令牌，不能让整个界面中断初始化。
+}
+let consoleAuthPrompted = false;
 (function () {
   // 如果通过 ?token= 进入（控制台启用鉴权时根路径会重定向带 token），存到 localStorage
   const qs = new URLSearchParams(location.search);
   const token = qs.get('token');
   if (token) {
-    localStorage.setItem('consoleToken', token);
+    saveConsoleToken(token);
     history.replaceState({}, '', location.pathname + location.hash);
   }
+  const billingLink = document.getElementById('billingDirect');
+  if (billingLink && consoleTokenMemory) billingLink.href = '/billing?token=' + encodeURIComponent(consoleTokenMemory);
 })();
 
 async function api(path, method, body, _retried = 0) {
   const headers = body ? {'content-type':'application/json'} : {};
-  const token = localStorage.getItem('consoleToken');
+  const token = consoleTokenMemory;
   if (token) headers['x-console-token'] = token;
   const res = await fetch(path, { method: method || 'GET', headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) {
+    // 其它并发请求可能已更新令牌；旧请求重试即可，不能连续弹出十几个登录框。
+    if (consoleTokenMemory && consoleTokenMemory !== token && _retried < 2) return api(path, method, body, _retried + 1);
     if (_retried >= 2) {
-      localStorage.removeItem('consoleToken');
+      saveConsoleToken('');
       throw new Error('未授权');
     }
+    if (consoleAuthPrompted) throw new Error('登录已失效，请重新打开控制台入口');
+    consoleAuthPrompted = true;
     const t = prompt('请输入控制台访问令牌：');
     if (t) {
-      localStorage.setItem('consoleToken', t.trim());
+      saveConsoleToken(t.trim());
       return api(path, method, body, _retried + 1);
     }
-    localStorage.removeItem('consoleToken');
+    saveConsoleToken('');
     throw new Error('未授权');
   }
   return res.json();
@@ -4443,7 +4460,7 @@ async function changeConsoleToken(generate) {
     return;
   }
   // 保存到 localStorage，当前页面继续使用新令牌
-  localStorage.setItem('consoleToken', r.token);
+  saveConsoleToken(r.token);
   input.value = r.token;
   msg.textContent = r.generated ? '已生成随机令牌，当前页面已自动使用。可点击显示后复制。' : '已保存新令牌';
   msg.className = 'meta ok';
@@ -5109,7 +5126,7 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
 <script>
 document.getElementById('extensionsOpen').addEventListener('click', function (event) {
   event.preventDefault();
-  location.href = '/extensions?token=' + encodeURIComponent(localStorage.getItem('consoleToken') || '');
+  location.href = '/extensions?token=' + encodeURIComponent(consoleTokenMemory);
 });
 </script>
 </body>

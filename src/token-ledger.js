@@ -34,6 +34,7 @@ import {
   normalizeUsage,
   priceUsage,
   ratesAt,
+  subBuckets,
   totalTokensOf
 } from './model-prices.js';
 
@@ -504,8 +505,8 @@ export function createTokenLedger({
    * 而且 sessionTotals/sessionCost/turnRows 各扫一遍 = 3 倍），几千条采样、几十个会话
    * 就是百万级迭代。这里压成单遍 O(采样数)。
    *
-   * 基线单独计价（它没有逐时明细，只能整体按快照时刻的峰谷算），并只把
-   * `seq > 基线 seq` 的采样算进「权威累计」，避免和基线重复计费。
+    * token累计只补 `seq > 基线 seq` 的采样，避免重复计数；金额优先按回执
+    * 原调用时间计价，基线里缺少回执的差额才使用快照时点估价。
    */
   function buildIndex() {
     const index = new Map();
@@ -514,6 +515,7 @@ export function createTokenLedger({
       if (!entry) {
         entry = {
           liveBuckets: { ...ZERO_BUCKETS },
+          coveredBuckets: { ...ZERO_BUCKETS },
           liveCost: 0,
           liveByTier: { peak: 0, off: 0 },
           allCost: 0,
@@ -534,6 +536,8 @@ export function createTokenLedger({
         entry.liveBuckets = addBuckets(entry.liveBuckets, s.buckets);
         entry.liveCost += p.cost.total;
         entry.liveByTier[p.rates.tier] += p.cost.total;
+      } else {
+        entry.coveredBuckets = addBuckets(entry.coveredBuckets, s.buckets);
       }
       let row = entry.turns.get(s.turn);
       if (!row) {
@@ -595,12 +599,18 @@ export function createTokenLedger({
       const total = addBuckets(cumulative, liveBuckets);
       view.buckets = addBuckets(view.buckets, total);
 
-      let cost = (entry?.liveCost ?? 0) + (gone?.cost ?? 0);
-      view.byTier.peak += (entry?.liveByTier.peak ?? 0) + (gone?.byTier.peak ?? 0);
-      view.byTier.off += (entry?.liveByTier.off ?? 0) + (gone?.byTier.off ?? 0);
-      view.estimated ||= (entry?.estimated ?? false) || (gone?.estimated ?? false);
+      // 已有回执按原调用时间计价，重连不能把历史高峰费用重算成当前空闲价。
+      // evict 虽可能已被投影覆盖，其已记录的历史金额仍优先于快照时点估价。
+      let cost = (entry?.allCost ?? 0) + (rawGone?.cost ?? 0);
+      view.byTier.peak += (entry?.allByTier.peak ?? 0) + (rawGone?.byTier.peak ?? 0);
+      view.byTier.off += (entry?.allByTier.off ?? 0) + (rawGone?.byTier.off ?? 0);
+      view.estimated ||= (entry?.estimated ?? false) || (rawGone?.estimated ?? false);
       if (base) {
-        const p = priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable });
+        const covered = addBuckets(entry?.coveredBuckets ?? ZERO_BUCKETS,
+          evictionCovered(rawGone) ? rawGone.buckets : ZERO_BUCKETS);
+        // 投影与逐步回执可能有少量结算差异，差额逐桶下限为0；不删改原始记录。
+        const unknown = subBuckets(base.buckets, covered);
+        const p = priceUsage(unknown, { model: base.model, at: base.t || now(), table: priceTable });
         cost += p.cost.total;
         view.byTier[p.rates.tier] += p.cost.total;
         view.estimated ||= p.rates.estimated;
@@ -785,30 +795,14 @@ export function createTokenLedger({
     // 图上标的「轮次」其实一直是「请求数」，且这层去重是纯粹的死代码。
     const turnSeen = new Set();
     const rowTurnSeen = rows.map(() => new Set());
-    // 权威总额（含窗口之外）的三个组成部分，按 summary() 的同一口径在**同一次遍历**里累加：
-    //   ① 被淘汰采样的累计（evicted）② 投影基线自身 ③ 仍然逐轮可拆、且没被基线覆盖的采样（seq > 基线 seq）。
-    // 非 live 采样绝不能计入：基线已经包含了它的历史，再算一次就是重复计费，offChartCost 会凭空变大。
-    let ledgerCost = 0;
-    let ledgerBuckets = { ...ZERO_BUCKETS };
-    for (const e of evicted.values()) {
-      if (evictionCovered(e)) continue; // 已被投影基线覆盖：再加一次就是重复计费
-      ledgerCost += Number(e.cost) || 0;
-      ledgerBuckets = addBuckets(ledgerBuckets, e.buckets);
-    }
-    for (const base of baselines.values()) {
-      // 与 sessionView() 同口径：基线没有逐时明细，按快照时刻（缺失时取当前）整体计价。
-      ledgerCost += priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }).cost.total;
-      ledgerBuckets = addBuckets(ledgerBuckets, base.buckets);
-    }
+    // 与summary共用历史金额口径，不能把快照覆盖的回执重新按快照时刻定价。
+    const ledgerTotals = summary({ limit: 1 }).totals;
+    const ledgerCost = ledgerTotals.cost;
+    const ledgerBuckets = ledgerTotals.buckets;
     for (const s of samples.values()) {
       // 这条采样的计价只算一次：窗口内的桶与窗口外的"总额"共用同一个 p。
       const p = priceUsage(s.buckets, { model: s.model, at: s.t || endAt, table: priceTable });
       const tokens = totalTokensOf(s.buckets);
-      const base = baselines.get(s.sessionId);
-      if (!base || s.seq > base.seq) {
-        ledgerCost += p.cost.total;
-        ledgerBuckets = addBuckets(ledgerBuckets, s.buckets);
-      }
       if (s.t < start || s.t >= end) continue;
       const idx = Math.min(count - 1, Math.max(0, Math.floor((s.t - start) / bucketMs)));
       const row = rows[idx];

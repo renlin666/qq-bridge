@@ -9,6 +9,12 @@
     "authPrefix": "Bearer",
     "allowRemote": false
   },
+  "costControl": {
+    "enabled": false,
+    "maxCnyPerMessage": 0.1,
+    "cacheHitRatio": 0.9,
+    "exemptOwner": false
+  },
   "role": {
     "maxInjectChars": 6000
   },
@@ -283,7 +289,7 @@
   "integrations": {
     "bilibili": {
       "enabled": true,
-      "maxVideoSeconds": 300,
+      "maxVideoSeconds": 180,
       "defaultFrameCount": 8,
       "maxTextChars": 6000,
       "ffmpegPath": "",
@@ -298,6 +304,13 @@
       "maxPerDay": 3,
       "minIntervalSeconds": 1800,
       "commentsEnabled": false,
+      "friendsEnabled": false,
+      "likesEnabled": false,
+      "autoBrowseFriends": false,
+      "friendPollIntervalMs": 1800000,
+      "likeIntervalSeconds": 60,
+      "maxLikesPerDay": 20,
+      "maxCommentLikesPerPost": 3,
       "autoReact": false,
       "pollIntervalMs": 120000,
       "commentKey": ""

@@ -61,8 +61,8 @@ test('许可绑定真实发信人、原视频与当前会话消息，引用他�
   assert.equal(videoApproval(message, [grant], cfg, '99'), null);
 });
 
-test('真实@与引用、昵称、@全体分开；门槛默认300秒8帧', () => {
-  assert.deepEqual(videoPolicy(), { maxVideoSeconds: 300, defaultFrameCount: 8, maxTextChars: 6000 });
+test('真实@与引用、昵称、@全体分开；门槛默认180秒8帧', () => {
+  assert.deepEqual(videoPolicy(), { maxVideoSeconds: 180, defaultFrameCount: 8, maxTextChars: 6000 });
   for (const message of [[{ type: 'text', data: { text: '@10001' } }], [{ type: 'reply', data: { id: '1' } }], [{ type: 'at', data: { qq: 'all' } }], [{ type: 'at', data: { qq: '10002' } }]]) {
     assert.equal(directlyMentionsBot({ self_id: 10001, message }), false);
   }
@@ -70,7 +70,7 @@ test('真实@与引用、昵称、@全体分开；门槛默认300秒8帧', () =>
 });
 
 test('超长/未知时长/多P总时长超限在字幕和媒体请求前停止，片段参数不能绕过', async () => {
-  for (const [duration, total] of [[301, 301], [undefined, undefined], [null, null], [10, 600]]) {
+  for (const [duration, total] of [[181, 181], [undefined, undefined], [null, null], [10, 600]]) {
     let requests = 0;
     const fetcher = async url => {
       requests++;
@@ -86,19 +86,19 @@ test('超长/未知时长/多P总时长超限在字幕和媒体请求前停止�
     assert.equal(result.description, undefined);
   }
   let calls = 0;
-  const result = await readBilibili(bv, { maxVideoSeconds: 300, fetcher: async url => {
+  const result = await readBilibili(bv, { maxVideoSeconds: 180, fetcher: async url => {
     calls++;
-    return { statusCode: 200, url, body: JSON.stringify(url.includes('/view?') ? { code: 0, data: { bvid: bv, duration: 300, pages: [{ cid: 1, duration: 300 }] } } : { data: {} }) };
+    return { statusCode: 200, url, body: JSON.stringify(url.includes('/view?') ? { code: 0, data: { bvid: bv, duration: 180, pages: [{ cid: 1, duration: 180 }] } } : { data: {} }) };
   } });
   assert.equal(result.watchBlockReason, undefined);
-  assert.equal(calls, 2, '恰好300秒允许继续检查字幕');
+  assert.equal(calls, 2, '恰好180秒允许继续检查字幕');
 });
 
-test('≤300秒无需@；超长需真实许可；撤销账号后不能借缓存或参数绕过', async t => {
+test('≤180秒无需@；超长需真实许可；撤销账号后不能借缓存或参数绕过', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-video-policy-'));
   const cfg = { integrations: { bilibili: { approvalUserId: '10009' } } };
   const message = { messageId: '1', seq: 42, directAtSelf: false, sharedLinks: ['https://www.bilibili.com/video/' + bv] };
-  const messages = [message]; let reads = 0, duration = 300, approvedOptions;
+  const messages = [message]; let reads = 0, duration = 180, approvedOptions;
   let clock = Date.now(); t.mock.method(Date, 'now', () => clock);
   const integration = createIntegrations({ stateDir: dir, getConfig: () => cfg,
     getConversation: () => ({ recentMessages: messages }), sessionAllowed: () => true, tokenOk: () => true,
@@ -106,9 +106,9 @@ test('≤300秒无需@；超长需真实许可；撤销账号后不能借缓存�
   t.after(async () => { await integration.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const scope = { key: 'group:456', assertAuthorized() {} };
   const read = async (extra = {}) => { clock += 6000; return JSON.parse((await integration.host.callTool('qq_read_bilibili', { messageId: '1', ...extra }, scope)).content[0].text).video; };
-  assert.equal((await read()).duration, 300);
+  assert.equal((await read()).duration, 180);
   assert.equal(approvedOptions, false);
-  duration = 301;
+  duration = 181;
   assert.equal((await read()).reason, 'duration_exceeded');
   messages.push({ seq: 43, userId: '10008', plain: '允许观看视频 42' });
   assert.equal((await read()).reason, 'duration_exceeded');

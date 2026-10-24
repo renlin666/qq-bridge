@@ -18,7 +18,8 @@
 - 搜图发图：`qq_search_images` 返回可实际查看的图片和 `imageId`；选择后可直接 `qq_send_image` 发当前聊天，或 `qq_send_to_contact(imageIds)` 发授权好友/群，无需先收藏。预览与发送使用同一份经过格式、大小、像素和来源权限检查的图片字节；缓存仅来源会话可用，1小时有效。原图取不到时可返回明确标记的真实缩略图，不把网页链接当图片。
 - 共享记忆：`socialV2.sharedMemory` 显式授权的会话共用 `state/shared-memory.json`。人物按真实 QQ 号关联，群名片不同仍能识别；共同经历单独记录，不自动共享聊天原文。账号、来源会话授权、当前人物可见范围均在查询时检查。
 - 窗口联动：`qq_list_linked_conversations` 列出授权目标；实际给好友/群发送文字和图片用 `qq_send_to_contact`，由桥接执行并保存 QQ 消息回执。`qq_handoff` 只持久化摘要并唤醒目标会话；`qq_ack_handoff` 只确认交接，返回 `sent:false`，不能作为发送依据。
-- 空间评论：`commentsEnabled=true` 开启 `qq_list_qzone` / `qq_get_qzone_comments` / `qq_react_qzone`。只操作机器人自己的说说。指定真实 `commentId` 和 `commentUserId` 可回复评论；不传则发表一级评论。
+- 空间评论：`commentsEnabled=true` 开启 `qq_list_qzone` / `qq_get_qzone_comments` / `qq_react_qzone`。开启 `friendsEnabled` 后支持好友空间，传真实 `targetUserId`；指定真实 `commentId` 和 `commentUserId` 可回复评论，不传则发表一级评论。
+- 空间点赞：`likesEnabled=true` 开启 `qq_like_qzone` 和 `qq_like_qzone_comment`。先读取真实说说/评论，提供具体点赞理由；只选有信息、有共鸣或确实有趣的内容，不逐条点赞。详见[好友空间互动说明](QQ_QZONE_FRIENDS.md)。
 - `autoReact=true` 时，每 120 秒（最低 60 秒）只读检查最近说说评论；首次检查建立静默基线，不批量回复旧评论。新评论交给该说说发布会话，旧说说交给 `commentKey` 或授权的主人私聊。机器人自己发出的评论不触发；已见记录、待投递事件和写入幂等记录持久化在 `state/qzone-interactions.json`。二级回复只覆盖服务端内联返回部分。
 
 ### 配图与共享记忆示例

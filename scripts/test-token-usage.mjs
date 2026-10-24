@@ -171,6 +171,23 @@ assert(near(c.cost, (1 + 4) * 2 + (1 + 4)), `峰谷分时计价：高峰轮 ¥10
 assert(near(c.byTier.peak, 10) && near(c.byTier.off, 5), '高峰期/空闲期花费分开统计');
 
 // ── 9. 半行容错 ─────────────────────────────────────────────────────────
+// 重连快照不能抹掉原始回执的峰谷价格。
+ledger = freshLedger({ resolveKey: () => 'group:100' });
+ledger.ingestEvent({ sessionId: 's1', event: evMsg(10, 1, 1, usage(1e6, 0)), at: mon('10:00') });
+ledger.ingestBaseline({ sessionId: 's1', projection: { asOfSeq: 20, values: { tokenUsage: usage(1e6, 0) } }, at: mon('20:00'), model: 'deepseek-flash' });
+c = ledger.summary().conversations[0];
+assert(near(c.cost, 2) && near(c.attributedCost, 2), '空闲时重连仍按原高峰回执计价，不把总额改小');
+assert(near(c.byTier.peak, 2) && near(c.byTier.off, 0), '重连后保留真实高峰分项');
+const reloadedBilling = createTokenLedger({ file: ledgerFile, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'group:100' });
+assert(near(reloadedBilling.summary().totals.cost, 2), '重载账本后峰谷金额保持不变');
+ledger.ingestBaseline({ sessionId: 's1', projection: { asOfSeq: 30, values: { tokenUsage: usage(2e6, 0) } }, at: mon('20:00'), model: 'deepseek-flash' });
+c = ledger.summary().conversations[0];
+assert(near(c.cost, 3) && near(c.unattributedCost, 1), '只有缺少回执的历史差额按快照时点估价');
+const reconnectedSeries = ledger.series({ hours: 24, at: mon('21:00') });
+assert(near(reconnectedSeries.totals.cost + reconnectedSeries.offChartCost, ledger.summary().totals.cost), '重连后走势图与累计金额同口径');
+const aliasRate = ratesAt('deepseek-v4.1-flash-1017', mon('20:00'));
+assert(aliasRate.estimated === false && near(aliasRate.cacheMiss, offRates.cacheMiss), '已确认的QQ Flash别名使用正式价目，不误报未知模型');
+
 fs.appendFileSync(ledgerFile, '{"k":"turn","sid":"s1","turn":9,"ste', 'utf8');
 ledger = createTokenLedger({ file: ledgerFile, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'group:100' });
 assert(ledger.stats().droppedLines === 1, '进程中断留下的半行被跳过而不是让账本读不出来');

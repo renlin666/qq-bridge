@@ -181,7 +181,8 @@ export function isPeakAt(atMs, table = DEFAULT_PRICE_TABLE) {
 /** 取某模型在某一时刻生效的单价（含峰谷判定）。 */
 export function ratesAt(model, atMs, table = DEFAULT_PRICE_TABLE) {
   const key = String(model ?? '').trim();
-  const entry = table.models[key];
+  const entry = table.models[key] ?? (['deepseek-v4.1-flash-1017', 'deepseek-v4.1-flash'].includes(key)
+    ? table.models['deepseek-flash'] : undefined);
   const chosen = entry ?? table.models[table.fallbackModel];
   const off = chosen.off;
   const peak = isPeakAt(atMs, table);

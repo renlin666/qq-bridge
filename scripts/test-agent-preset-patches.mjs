@@ -99,7 +99,7 @@ console.log('## 4. bundle 声明与安全边界');
     const shimMod = await import(pathToFileURL(shim).href);
     assert.equal(shimMod.apply, canonicalMod.apply, `${name}: 壳与实现在同一模块实例上`);
     assert.equal(shimMod.name, 'qq-tool-restrict');
-    assert.deepEqual(shimMod.inject, ['tools']);
+    assert.deepEqual(shimMod.inject, ['tools', 'systemPrompt']);
   }
   ok(true, 're-export 壳与权威实现导出同一份 apply/inject');
 

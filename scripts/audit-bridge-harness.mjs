@@ -29,6 +29,8 @@ import * as memoryPolicy from '../src/qq-memory-policy.js';
 import * as continuation from '../src/output-continuation.js';
 import { directlyMentionsBot } from '../src/video-watch-policy.js';
 import * as peakEconomy from '../src/peak-economy.js';
+import * as costPolicy from '../src/qq-cost-policy.js';
+import * as costDeliveries from '../src/qq-cost-deliveries.js';
 import { FLASH_MODELS } from '../plugins/qq-agent-presets/qq-platform-policy.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
@@ -96,8 +98,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     callUnary: async (method, params) => { calls.cancelled.push({ method, params }); return success({ accepted: true }); },
   };
   class FakeBot {
-    async sendPrivateMessage(id, text) { calls.sent.push({ kind: 'private', id, text }); }
-    async sendGroupMessage(id, text) { calls.sent.push({ kind: 'group', id, text }); }
+    async sendPrivateMessage(id, text) { calls.sent.push({ kind: 'private', id, text }); return { message_id: calls.sent.length }; }
+    async sendGroupMessage(id, text) { calls.sent.push({ kind: 'group', id, text }); return { message_id: calls.sent.length }; }
     async getImage({ file }) {
       calls.images.push(file);
       // Valid 1 × 1 PNG, supplied entirely in memory by the fixture gateway.
@@ -129,7 +131,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   return {
     ensureSession, ensureSlangLearnerSession, resolvePresetName, deliverPrompt, drainPromptQueue,
     closeExtensions: () => closeProjectExtensions(),
-    sendToQQ, sendStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
+    sendToQQ, sendStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues, reportAgentError,
+    sendMessagesV2, sendContactPartV2,
     getSocialV2State, appendSocialV2Message, recordSentMessagesV2,
     buildWakePromptV2, buildWakeSnapshotV2, sendWakePromptV2, socialV2,
     refreshMode, modeAllowed, trackTurnEvent, replayPendingWakeReasonsV2,
@@ -171,7 +174,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,
     discoverDshLaunchToken: () => '', unwrap, createTurnCollector,
     ...continuation, FLASH_MODELS, directlyMentionsBot,
-    ...peakEconomy,
+    ...peakEconomy, ...costPolicy, ...costDeliveries,
     ...roleCard,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker,
     ...modelPrices, ...tokenLedger, ...voiceLib, ...stateAcl, ...presetPrompt, ...bilibili, ...integrations, ...socialHub, ...imageSearch, ...memoryPolicy,

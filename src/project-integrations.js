@@ -125,7 +125,7 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     const result = await host.invokeAction(action, body, current);
     if (result != null) { current.assertAuthorized(); sendJson({ ok: true, key: current.key, ...result }); return true; }
     // These aliases are owned by plugins even when disabled; never fall back around a disabled plugin.
-    if (['bilibili', 'magnet', 'quark-status', 'qzone-publish', 'qzone-list', 'qzone-comments', 'qzone-react', 'image-search', 'image-send'].includes(action)) fail('插件未启用或功能已关闭', 403);
+    if (['bilibili', 'magnet', 'quark-status', 'qzone-publish', 'qzone-list', 'qzone-feed', 'qzone-comments', 'qzone-react', 'qzone-like', 'qzone-like-comment', 'image-search', 'image-send'].includes(action)) fail('插件未启用或功能已关闭', 403);
     const socialResult = await socialHub?.handle(action, current.key, body, current.assertAuthorized);
     if (socialResult != null) { current.assertAuthorized(); sendJson({ ok: true, key: current.key, ...socialResult }); return true; }
     sendJson({ ok: false, error: '未知扩展功能' }, 404); return true;

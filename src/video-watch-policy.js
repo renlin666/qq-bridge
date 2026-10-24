@@ -3,7 +3,7 @@ export function videoPolicy(config = {}) {
     const n = Number(config[key]);
     return Number.isFinite(n) && n >= 1 ? Math.min(max, Math.floor(n)) : fallback;
   };
-  return { maxVideoSeconds: bounded('maxVideoSeconds', 300, 3600),
+  return { maxVideoSeconds: bounded('maxVideoSeconds', 180, 3600),
     defaultFrameCount: bounded('defaultFrameCount', 8, 16), maxTextChars: bounded('maxTextChars', 6000, 24000) };
 }
 

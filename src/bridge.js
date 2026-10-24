@@ -37,6 +37,8 @@ import { bingImageSearch } from './image-search.js';
 import { createQqMemoryPolicy } from './qq-memory-policy.js';
 import { createOutputContinuation } from './output-continuation.js';
 import { FLASH_MODELS } from '../plugins/qq-agent-presets/qq-platform-policy.mjs';
+import { isQqCostLimit, grantOwnerCostExemption } from './qq-cost-policy.js';
+import { recordCostDelivery } from './qq-cost-deliveries.js';
 import {
   loadSlang,
   saveSlang,
@@ -705,6 +707,7 @@ function loadConfig() {
     webSearch: file.webSearch ?? {},
     // 价目表覆盖项（可选）。留空即用 src/model-prices.js 的官方默认价。
     pricing: file.pricing ?? null,
+    costControl: file.costControl ?? {},
     security: {
       interceptNotify: true,
       ...(file.security ?? {})
@@ -1742,6 +1745,7 @@ async function main() {
         const params = kind === 'private'
           ? { user_id: Number(id), message: [recordSegment] }
           : { group_id: Number(id), message: [recordSegment] };
+        const noteDelivery = guard ? captureCostDelivery(key) : () => {};
         const res = await fetch(`${httpUrl}/${action}`, {
           method: 'POST',
           headers: {
@@ -1756,6 +1760,7 @@ async function main() {
           const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口）' : '';
           throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
         }
+        noteDelivery(body.data?.message_id);
         resolveSend(body.data);
       } catch (error) {
         rejectSend(error);
@@ -1886,7 +1891,7 @@ async function main() {
     return { ...sent, key, file: resolved.path, via: resolved.via, verification, readback: readbackText };
   }
 
-  // 发送一个收藏表情（按 emoji_id/url/md5 解析，发图片段）。
+  // 发送一个收藏表情（按 emoji_id/url/md5 解析，保留 QQ 收藏表情子类型）。
   async function sendStickerV2(key, stickerRef, options = {}) {
     const assertSendAllowed = captureSendGuard(key);
     // 发送前强制同步一次，确保“刚新增的表情能立即用、刚删除的表情不会继续发”。
@@ -1918,7 +1923,13 @@ async function main() {
     } catch (error) {
       throw new Error(`表情 ${entry.id} 的图片下载失败（QQ CDN 网络异常或地址已失效）：${error?.message ?? error}`);
     }
-    segments.push({ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } });
+    // QQ 收藏表情仍使用 image 段，通过 sub_type=1 区分普通图片。
+    // 与 SnowLuma send_custom_face 的发送标记一致；仅改网关参数，不增加模型上下文。
+    segments.push({ type: 'image', data: {
+      file: 'base64://' + image.buffer.toString('base64'),
+      sub_type: 1,
+      summary: '[动画表情]'
+    } });
     const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
     const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -1935,6 +1946,7 @@ async function main() {
         await sleep(randInt(800, 2000));
         assertSendAllowed();
         options.beforeSend?.();
+        const noteDelivery = captureCostDelivery(options.costSourceKey ?? key, key);
         const res = await fetch(`${httpUrl}/${action}`, {
           method: 'POST',
           headers: {
@@ -1949,6 +1961,7 @@ async function main() {
           const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
           throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
         }
+        noteDelivery(body.data?.message_id);
         sendResolve(body.data);
       } catch (error) {
         sendReject(error);
@@ -3185,8 +3198,11 @@ async function main() {
         const st = getSocialV2State(key);
         const messageId = `qzone:${event.id}`;
         if (!st.recentMessages.some(m => m.messageId === messageId)) {
-          appendSocialV2Message(key, `空间评论·${event.name || event.userId}`,
-            `【空间新评论】说说 tid=${event.tid}，commentId=${event.commentId}，commentUserId=${event.userId}${event.parentId ? `，parentCommentId=${event.parentId}` : ''}：${event.content}。这是空间互动，不要把回复发到群里；可用 qq_react_qzone 回复，或选择不回应。`,
+          const notice = event.kind === 'friend-post'
+            ? `【好友空间新说说】targetUserId=${event.targetUserId}，tid=${event.tid}：${event.content}。先读懂，确有共鸣再用qq_like_qzone或qq_react_qzone；评论用qq_get_qzone_comments读取，再挑说得好的用qq_like_qzone_comment。可不操作，不逐条点赞，不把空间回应发到群里。`
+            : `【空间新评论】说说 targetUserId=${event.targetUserId || selfUserId}，tid=${event.tid}，commentId=${event.commentId}，commentUserId=${event.userId}${event.parentId ? `，parentCommentId=${event.parentId}` : ''}：${event.content}。这是空间互动，不要把回复发到群里；可用 qq_react_qzone 回复，或对说得好且有共鸣的一级评论用qq_like_qzone_comment点赞，也可不回应。不要每条都点。`;
+          appendSocialV2Message(key, `空间互动·${event.name || event.userId}`,
+            notice,
             event.content, false, false, messageId, [], null);
         }
         await wakeExternalV2(key, 'qzoneComment');
@@ -3307,9 +3323,9 @@ async function main() {
         return crypto.timingSafeEqual(a, b);
       })();
       if (consoleToken && !tokenMatches) {
-        if (req.method === 'GET' && url.pathname === '/') {
+        if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/billing')) {
           res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
-          res.end('<!doctype html><meta charset="utf-8"><title>需要令牌</title><script>const t=prompt(\'请输入控制台访问令牌\');if(t)location.href=\'/?token=\'+encodeURIComponent(t);</script>');
+          res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 QQ Bridge</title><main style="max-width:420px;margin:12vh auto;padding:24px;font:16px system-ui"><h1>QQ Bridge</h1><p>请输入控制台访问令牌以查看控制台和账单。</p><form><input id="token" type="password" autocomplete="off" aria-label="控制台访问令牌" style="padding:10px;width:90%" required><button style="margin-top:16px;padding:10px 24px">打开</button></form></main><script>document.querySelector('form').onsubmit=function(e){e.preventDefault();var t=document.getElementById('token').value.trim();if(t)location.href=${JSON.stringify(url.pathname)}+'?token='+encodeURIComponent(t);};</script>`);
         } else {
           sendJson({ ok: false, error: '未授权：请提供控制台访问令牌' }, 401);
         }
@@ -3464,10 +3480,10 @@ async function main() {
             return;
           }
         }
-        if (req.method === 'GET' && url.pathname === '/') {
+        if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/billing')) {
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
           try {
-            res.end(fs.readFileSync(path.join(ROOT, 'public', 'console.html'), 'utf8'));
+            res.end(fs.readFileSync(path.join(ROOT, 'public', url.pathname === '/billing' ? 'billing.html' : 'console.html'), 'utf8'));
           } catch {
             res.end('控制台页面缺失：qq-bridge/public/console.html');
           }
@@ -7197,6 +7213,14 @@ async function main() {
 
   // QQ 发送队列（顺序发送 + 间隔，避免触发频率限制）
   let sendChain = Promise.resolve();
+  function captureCostDelivery(sourceKey, targetKey = sourceKey) {
+    const sessionId = state.sessions[sourceKey];
+    if (!sessionId || cfg.costControl?.enabled !== true) return () => {};
+    return messageId => {
+      try { recordCostDelivery(ROOT, sessionId, targetKey, messageId); }
+      catch (error) { log(`费用发送回执保存失败 (${sourceKey})：${error.message}`); }
+    };
+  }
   function redactKnownTokensOnly(text) {
     let s = String(text ?? '');
     for (const token of KNOWN_AGENT_TOKENS) {
@@ -7210,7 +7234,7 @@ async function main() {
   // 更新 lastAiReplyAt / 活跃调度，实际群里什么都没收到，而且只有一行滚动日志能看出问题。
   const lastSendFailed = new Map(); // key -> true（下一次成功即清除）
 
-  function sendToQQ(key, msg) {
+  function sendToQQ(key, msg, { accountCost = false } = {}) {
     const assertSendAllowed = captureSendGuard(key);
     const safeMsg = redactKnownTokensOnly(msg);
     const [kind, id] = key.split(':');
@@ -7220,8 +7244,11 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
-          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          const noteDelivery = accountCost ? captureCostDelivery(key) : () => {};
+          const data = kind === 'private'
+            ? await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`)
+            : await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          noteDelivery(data?.message_id);
         })
         .catch((error) => {
           lastSendFailed.set(key, true);
@@ -7412,8 +7439,11 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
-          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          const noteDelivery = captureCostDelivery(key);
+          const data = kind === 'private'
+            ? await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`)
+            : await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          noteDelivery(data?.message_id);
           sent.push(msg);
         })
         .catch((error) => {
@@ -7992,7 +8022,9 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          await onebotSend(kind, id, msg, useReply, useAt);
+          const noteDelivery = captureCostDelivery(key);
+          const data = await onebotSend(kind, id, msg, useReply, useAt);
+          noteDelivery(data?.message_id);
           sent.push(msg);
         })
         .catch((error) => {
@@ -8037,7 +8069,7 @@ async function main() {
       };
       let result;
       if (part.type === 'sticker') {
-        result = await sendStickerV2(key, part.stickerId, { beforeSend });
+        result = await sendStickerV2(key, part.stickerId, { beforeSend, costSourceKey: sourceKey });
       } else if (part.type === 'image') {
         const image = socialHub.imageForSend(sourceKey, part.imageId);
         const [kind, id] = key.split(':');
@@ -8046,6 +8078,7 @@ async function main() {
           // Never hand an arbitrary URL or local path to the QQ gateway.
           socialHub.imageForSend(sourceKey, part.imageId);
           beforeSend();
+          const noteDelivery = captureCostDelivery(sourceKey, key);
           const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
           const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
           const message = [{ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } }];
@@ -8057,6 +8090,7 @@ async function main() {
           });
           const response = await res.json().catch(() => ({}));
           if (!res.ok || response.status !== 'ok' || response.retcode !== 0) throw new Error(`OneBot 图片发送失败: ${response.wording || response.retcode || res.status}`);
+          noteDelivery(response.data?.message_id);
           return { messageId: response.data?.message_id, title: image.title };
         });
         sendChain = pending.catch(() => {}); result = await pending;
@@ -8064,7 +8098,9 @@ async function main() {
         const [kind, id] = key.split(':');
         const pending = sendChain.then(async () => {
           beforeSend();
+          const noteDelivery = captureCostDelivery(sourceKey, key);
           const data = await onebotSend(kind, id, part.content);
+          noteDelivery(data?.message_id);
           return { messageId: data?.message_id };
         });
         sendChain = pending.catch(() => {});
@@ -9235,6 +9271,14 @@ async function main() {
     return p;
   }
 
+  async function reportAgentError(key, reason) {
+    const msg = reason.error?.message ?? reason.failure?.message ?? '未知错误';
+    const safeMsg = shouldAuditKey(key) && SENSITIVE_RE.test(msg) ? '（含敏感信息，已隐藏）' : msg.slice(0, 500);
+    log(`⚠️ agent 处理出错 (${key})：${safeMsg}`);
+    appendActivity(`${key} agent 处理出错：${safeMsg.slice(0, 80)}`);
+    if (!isQqCostLimit(reason)) await sendToQQ(key, `⚠️ agent 处理出错：${safeMsg}`);
+  }
+
   // 实际的 DSH prompt 投递（不再直接对外暴露，统一走 promptQueues 串行队列）。
   async function deliverPromptNow(key, promptText, opts = {}) {
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
@@ -9319,13 +9363,21 @@ async function main() {
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
     if (opts.farewell) social.exitingSessions.add(sessionId);
     let accepted;
+    // Only genuine owner messages in this delivery grant a one-turn exception.
+    // Recent history, quoted IDs, and an agent's own words cannot grant it.
+    const ownerInSnapshot = wakeSnapshot?.messages.some(delivered => wakeState.unread.some(msg =>
+      msg.seq === delivered.seq && !msg.isSelf && msg.isOwner && String(msg.userId) === String(cfg.ownerQQ)));
+    const revokeCostGrant = ownerInSnapshot
+      ? grantOwnerCostExemption(ROOT, cfg, sessionId, content) : () => {};
     try {
       accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
     } catch (error) {
+      revokeCostGrant();
       if (opts.farewell) social.exitingSessions.delete(sessionId);
       throw error;
     }
     if (!accepted.result.ok) {
+      revokeCostGrant();
       if (opts.farewell) social.exitingSessions.delete(sessionId);
       const errText = `${accepted.result.error.code}: ${accepted.result.error.message}`;
       const safeErrText = shouldAuditKey(key) && SENSITIVE_RE.test(errText) ? '（含敏感信息，已隐藏）' : errText;
@@ -10372,7 +10424,7 @@ async function main() {
     // 避免唤醒 prompt 出现两份黑话表。
     const participationText = formatParticipationV2(st);
     const participationLine = participationText ? `${participationText}\n\n` : '';
-    const antiAiLine = '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\n\n';
+    const antiAiLine = '【风格】自然闲聊，不必有求必应；少用客服口吻和绝对化推荐。\n\n';
     const stickerCfg = cfg.socialV2?.sticker ?? {};
     const stickerLine = stickerCfg.enabled !== false && stickerCfg.includeInPrompt !== false
       ? `${buildStickerStrategyHint()}\n${buildStickerContext(stickerEntries, stickerCfg.promptMaxStickers ?? 8)}\n\n`
@@ -10381,10 +10433,10 @@ async function main() {
     const economy = peakEconomyStatus(cfg.socialV2?.peakEconomy, Date.now(), priceTable);
     const proactiveLine = economy.active
       ? `【峰时节流】减少可选闲聊、主动搭话和无必要的搜索；闲聊尽量一条、约${economy.replyChars}字内，不拆成多条。有明确@或私聊时正常响应，具体问题仍完整作答；没必要接话可潜水。\n\n`
-      : '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
+      : '【参与】有话可接就自然参与；没话可说、明确结束或久无人说话时潜水。\n\n';
     const replyTiming = replyTimingV2(st);
-    const replyLine = `【首回复节奏】先处理已有消息，完整的问题及时回答。需要确认对方是否继续补充时，用 qq_wait_for_messages(purpose="reply", quietMs=${replyTiming.quietMs})；从最后来信计时，合批和读提示词的耗时也算，目前还差约 ${Math.ceil(replyTiming.remainingQuietMs / 1000)} 秒静默。已安静够久可直接回，工具也会立即返回并补上思考期间的新消息。只有明确没说完、你确实要等下文时，才用普通 messages 长等待。\n\n`;
-    const preSleepLine = `【沉睡前强制等待】这是决定潜水收尾时的步骤，不是首回复的前置条件。除非对方明确说“不聊了/晚安/下了/拜拜”等结束语，否则每次设置潜水/下一次唤醒前，必须先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成一次沉睡前观察；回复前 purpose="reply" 的短静默不能代替这次完整观察。若 ${Math.round(preSleepMs / 60000)} 分钟内没人说话，返回 preSleepWaitSatisfied=true，可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看返回的 newMessages——判断不需要你参与就可以直接沉睡，若你选择参与回复，则下次想睡时需要重新等待观察窗口。如果返回里带 preSleepWaitRemainingMs，就按剩余时间继续等待。\n\n`;
+    const replyLine = `【首回复节奏】先处理已有消息；需要等补充时用 qq_wait_for_messages(purpose="reply", quietMs=${replyTiming.quietMs})，距最后来信还差约${Math.ceil(replyTiming.remainingQuietMs / 1000)}秒静默。合批/读提示词耗时已计入；安静够久可直接回，工具会立即返回并补新消息。明确没说完才用普通messages长等。\n\n`;
+    const preSleepLine = `【沉睡前强制等待】不是首回复的前置条件。除明确结束语外，潜水/设下次唤醒前须qq_wait_for_messages(timeoutMs=${preSleepMs})；purpose="reply"短等不能替代。preSleepWaitSatisfied=true可收尾；有newMessages先判断：不参与可直接睡，参与回复后须重新观察。preSleepWaitRemainingMs非零则继续等剩余时间。\n\n`;
     const lastMsg = [...(Array.isArray(st.recentMessages) ? st.recentMessages : [])].reverse().find((m) => m && !m.isSelf);
     const lastAiMin = st.lastAiReplyAt ? Math.max(0, Math.round((Date.now() - Number(st.lastAiReplyAt)) / 60000)) : null;
     const statusBits = [`未读 ${(st.unread || []).length} 条`];
@@ -10431,7 +10483,7 @@ async function main() {
     if (reason === 'poke') {
       return `${base}【唤醒】${key}\n原因：有人拍了一拍（可能拍了你，也可能拍了别人）。\n先看未读/最近消息里的 [拍一拍] 事件：如果是拍你，可以自然回应一句，也可以用 qq_send_poke 回一个拍一拍；如果是拍别人，觉得有趣也可以接梗。除了回应，偶尔也可以主动戳一下正在聊的人/熟人，像真人手贱/提醒/逗一下，但别频繁。不想接就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
     }
-    return `${base}【唤醒】${key}\n原因：${reason}\n【行动前】先判断：群里在聊什么？热闹还是冷清？有没有人直接找你？对方说完了吗？你有没有真正想说的？\n如果群聊正热但没人叫你，可以插一句有趣的/相关的，插不上再看情况潜水；不要一上来就划走。\n【引用：只在必要时用】只有你这条消息指向的人或消息并非最新一条别人的消息，或者你连续的几句话中不同消息指代的是不同的消息或人时，才用 qq_reply 或 qq_send_message 的 replyToMessageId 指向具体那条；其他情况不要引用，别让对方猜。\n你可以调用工具查看未读消息、人设、状态，自行决定是否发言；决定潜水前必须按上面的【沉睡前强制等待】先等够观察窗口。`;
+    return `${base}【唤醒】${key}\n原因：${reason}\n先判断话题、是否找你和是否说完；有合适内容可主动接话。仅回复较早消息或多句指代不同对象时用qq_reply/replyToMessageId，其余不引用。可按需查人设/状态；潜水前遵守上面的观察等待。`;
   }
 
   function buildWakeReminderPromptV2(key) {
@@ -11223,12 +11275,13 @@ async function main() {
       content = [{ type: 'text', text: withSlangContext(promptText) }, ...imageParts];
     }
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
-    const accepted = await api.sessions.prompt({
-      sessionId,
-      mode: 'queue',
-      content
-    });
+    const revokeCostGrant = isOwner ? grantOwnerCostExemption(ROOT, cfg, sessionId, content) : () => {};
+    let accepted;
+    try {
+      accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
+    } catch (error) { revokeCostGrant(); throw error; }
     if (!accepted.result.ok) {
+      revokeCostGrant();
       const errText = `${accepted.result.error.code}: ${accepted.result.error.message}`;
       const safeErrText = shouldAuditKey(key) && SENSITIVE_RE.test(errText) ? '（含敏感信息，已隐藏）' : errText;
       await sendToQQ(key, `⚠️ 消息未被接受：${safeErrText}`);
@@ -11738,7 +11791,7 @@ async function main() {
                   if (messages.length > 1) {
                     await sendBurstToQQ(key, messages, cfg.social);
                   } else {
-                    await sendToQQ(key, messages[0]);
+                    await sendToQQ(key, messages[0], { accountCost: true });
                   }
                   // 发言后刷新活跃时间，并调度可能的二次补刀
                   const st = socialState(key);
@@ -11774,15 +11827,10 @@ async function main() {
                   }
                   log(`agent 回复 (${key}) ${plain.length} 字`);
                   appendActivity(`${key} agent 回复：${plain.slice(0, 80)}${plain.length > 80 ? '…' : ''}`);
-                  await sendToQQ(key, plain);
+                  await sendToQQ(key, plain, { accountCost: true });
                 }
               } else if (ended.reason.kind === 'error') {
-                const msg = ended.reason.error?.message ?? '未知错误';
-                const safeMsg = shouldAuditKey(key) && SENSITIVE_RE.test(msg) ? '（含敏感信息，已隐藏）' : msg.slice(0, 500);
-                // 以前这里只发 QQ、不写日志：出问题时 bridge.log 里什么都没有，排查只能靠猜（PR #24）。
-                log(`⚠️ agent 处理出错 (${key})：${safeMsg}`);
-                appendActivity(`${key} agent 处理出错：${safeMsg.slice(0, 80)}`);
-                await sendToQQ(key, `⚠️ agent 处理出错：${safeMsg}`);
+                await reportAgentError(key, ended.reason);
                 if (isFarewell) {
                   const st = socialState(key);
                   if (st.phase === 'exiting') {
