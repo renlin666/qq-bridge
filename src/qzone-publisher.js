@@ -5,7 +5,7 @@ import { safeFetchBuffer } from './safe-fetch.js';
 import { SENSITIVE_RE } from './sensitive.js';
 
 // Existing publication ledger remains in place so upgrades never lose reserved requests.
-export function createQzonePublisher({ stateDir, getConfig, onebot, readMessageImages, readSelfImage, validateImage, fetchImage = safeFetchBuffer }) {
+export function createQzonePublisher({ stateDir, getConfig, onebot, readMessageImages, readSelfImage, readSearchImage, validateImage, fetchImage = safeFetchBuffer }) {
   const ledgerFile = path.join(stateDir, 'qzone-posts.json');
   let publishing = false;
   function error(message, statusCode = 400) { throw Object.assign(new Error(message), { statusCode }); }
@@ -34,10 +34,12 @@ export function createQzonePublisher({ stateDir, getConfig, onebot, readMessageI
       if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestId)) error('requestId 需为 8～100 位字母数字、下划线或连字符；重试必须复用同一个值');
       const urls = body.imageUrls ?? [];
       if (!Array.isArray(urls) || urls.length > 9 || urls.some(u => typeof u !== 'string' || !/^https:\/\//i.test(u))) error('最多 9 张公开 HTTPS 图片');
+      const imageIds = body.imageIds ?? [];
+      if (!Array.isArray(imageIds) || imageIds.some(id => typeof id !== 'string' || !/^img_[a-f0-9]{32}$/.test(id))) error('imageIds 需要本会话搜图返回的真实图片编号');
       const refs = body.imageMessages ?? [];
       if (!Array.isArray(refs) || refs.some(r => !r || !['string', 'number'].includes(typeof r.messageId)
         || (r.index != null && (!Number.isInteger(r.index) || r.index < 1 || r.index > 9)))) error('imageMessages 需要真实 messageId 和可选图片序号 index');
-      if (urls.length + refs.length + (body.includeSelfImage === true ? 1 : 0) > 9) error('每条空间最多 9 张图片');
+      if (urls.length + refs.length + imageIds.length + (body.includeSelfImage === true ? 1 : 0) > 9) error('每条空间最多 9 张图片');
       const visibility = Number(options.visibility ?? 4);
       if (![1, 4, 64].includes(visibility)) error('空间可见范围配置无效');
       if (publishing) error('空间正在发布另一条内容', 429);
@@ -47,7 +49,8 @@ export function createQzonePublisher({ stateDir, getConfig, onebot, readMessageI
         let rows = readLedger().filter(r => now - r.at < 7 * 86400000);
         const sources = refs.map(r => ({ messageId: String(r.messageId), index: r.index ?? 1 }));
         const digest = crypto.createHash('sha256').update(JSON.stringify({ key, content, urls, visibility,
-          ...(sources.length ? { sources } : {}), ...(body.includeSelfImage === true ? { selfImage: true } : {}) })).digest('hex');
+          ...(sources.length ? { sources } : {}), ...(body.includeSelfImage === true ? { selfImage: true } : {}),
+          ...(imageIds.length ? { imageIds } : {}) })).digest('hex');
         const duplicate = rows.find(r => r.key === key && r.requestId === requestId);
         if (duplicate) {
           if (duplicate.digest !== digest) error('requestId 已被其他内容使用', 409);
@@ -81,6 +84,11 @@ export function createQzonePublisher({ stateDir, getConfig, onebot, readMessageI
         if (body.includeSelfImage === true) {
           if (!readSelfImage) error('角色形象未就绪', 503);
           addImage(await readSelfImage());
+        }
+        for (const imageId of imageIds) {
+          if (!readSearchImage) error('搜图配图读取未就绪', 503);
+          // Reuse exactly the scoped, validated bytes shown in the search preview.
+          addImage(readSearchImage(key, imageId));
         }
         assertAuthorized();
         if (getConfig().integrations?.qzone?.enabled !== true || !getConfig().integrations.qzone.allowedKeys?.includes(key)) error('QQ 空间发布权限已撤销', 403);

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { parseBingImages, bingImageSearch, createImageSearchStore } from '../src/image-search.js';
 import { registerIntegrationTools } from '../src/mcp-qq-integrations.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { createQzonePublisher } from '../src/qzone-publisher.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=', 'base64');
 const source = 'private:12345', target = 'private:23456';
@@ -109,9 +110,9 @@ test('MCP returns image content blocks in the same order as candidate IDs', asyn
   assert.equal(result.content[1].data, png.toString('base64')); assert.ok(!result.content[0].text.includes('previews'));
 });
 
-async function bridge(t, extraGlobals = {}) {
+async function bridge(t, extraGlobals = {}, extraConfig = {}) {
   const h = await bridgeHarness({ config: { ownerQQ: 12345, allow: { private: ['12345', '23456'], groups: ['456'] }, webSearch: { enabled: true },
-    socialV2: { sharedMemory: { enabled: true, handoffEnabled: true, allowedKeys: [source, target, 'group:456'] } } }, globals: {
+    socialV2: { sharedMemory: { enabled: true, handoffEnabled: true, allowedKeys: [source, target, 'group:456'] } }, ...extraConfig }, globals: {
     bingImageSearch: async () => ({ provider: 'bing-images', results: [candidate] }), safeFetchBuffer: async () => ({ buffer: png }), ...extraGlobals } });
   h.setMode('reserved2'); h.setSelfIdentity('测试机器人', '99999');
   const token = h.getSocialV2State(source).agentToken;
@@ -155,4 +156,68 @@ test('real bridge rejects unissued IDs before QQ transport, and a missing receip
   const sent = await post('image-send', payload);
   assert.equal(sent.data.sent, false); assert.equal(sent.data.status, 'uncertain');
   await post('image-send', payload); assert.equal(writes, 1);
+});
+
+test('real bridge publishes searched preview bytes directly to Qzone, with readback and idempotent retry', async t => {
+  const { h, post } = await bridge(t, {}, { integrations: { qzone: { enabled: true, allowedKeys: [source, target] } } });
+  const writes = [];
+  h.bot.raw = async (action, params) => {
+    writes.push({ action, params });
+    return action === 'send_qzone_msg' ? { tid: 'searched-picture-post' }
+      : { msglist: [{ tid: 'searched-picture-post', images: ['observed-image'] }] };
+  };
+  const search = await post('image-search', { query: '孙笑川 表情包', count: 1 });
+  assert.equal(search.status, 200);
+  const imageId = search.data.images[0].imageId;
+  const payload = { content: '分享一张刚找到的图', imageIds: [imageId], requestId: 'qzone_search_001' };
+  const result = await post('qzone-publish', payload);
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  assert.equal(result.data.published, true); assert.equal(result.data.imagesVerified, true);
+  assert.equal(result.data.imageCount, 1);
+  assert.deepEqual(writes[0].params.images, ['base64://' + search.data.previews[0].data]);
+  assert.equal((await post('qzone-publish', payload)).data.duplicate, true);
+  assert.equal(writes.filter(w => w.action === 'send_qzone_msg').length, 1);
+  assert.equal(h.calls.sent.length, 0); assert.equal(h.calls.http.length, 0);
+  assert.equal((await post('qzone-publish', { ...payload, imageIds: ['img_' + 'a'.repeat(32)] })).status, 409);
+});
+
+test('Qzone cached images reject wrong source, revoked tools, invalid IDs and mixed image overflow before transport', async t => {
+  const { h, post } = await bridge(t, {}, { integrations: { qzone: { enabled: true, allowedKeys: [source, target] } } });
+  let writes = 0; h.bot.raw = async () => { writes++; return { tid: 'must-not-publish' }; };
+  const search = await post('image-search', { query: '孙笑川' });
+  const imageId = search.data.images[0].imageId;
+  const payload = { content: '配图校验', imageIds: [imageId], requestId: 'qzone_checks_001' };
+  const foreign = await post('qzone-publish', { ...payload, key: target }, h.getSocialV2State(target).agentToken);
+  assert.equal(foreign.status, 404); assert.match(foreign.data.error, /不属于/);
+  h.cfg.socialV2.tools.getImages = false;
+  assert.equal((await post('qzone-publish', payload)).status, 403);
+  h.cfg.socialV2.tools.getImages = true;
+  h.cfg.extensions = { 'image-search': { enabled: false } };
+  assert.equal((await post('qzone-publish', payload)).status, 403);
+  h.cfg.extensions['image-search'].enabled = true;
+  assert.equal((await post('qzone-publish', { ...payload, imageIds: ['https://example.com/a.png'] })).status, 400);
+  const overflow = await post('qzone-publish', { ...payload, imageIds: Array(9).fill(imageId), includeSelfImage: true });
+  assert.equal(overflow.status, 400); assert.match(overflow.data.error, /最多 9/);
+  assert.equal((await post('qzone-publish', payload, 'invalid-token')).status, 403);
+  assert.equal(writes, 0);
+});
+
+test('expired/tampered search images fail before publication; confirmed retries survive expired cache', async t => {
+  const f = fixture(t); f.cfg.integrations = { qzone: { enabled: true, allowedKeys: [source] } };
+  const result = await f.store.search(source, { query: '孙笑川' });
+  const imageId = result.images[0].imageId;
+  let writes = 0;
+  const publish = createQzonePublisher({ ...f.deps, readSearchImage: (key, id) => f.store.resolve(key, id).buffer,
+    onebot: async action => action === 'send_qzone_msg' ? (writes++, { tid: 'cache-post' })
+      : { msglist: [{ tid: 'cache-post', images: ['observed'] }] } });
+  const payload = { content: '图片缓存发布测试', imageIds: [imageId], requestId: 'qzone_cache_001' };
+  const file = path.join(f.deps.stateDir, 'image-search', imageId + '.bin');
+  fs.writeFileSync(file, Buffer.from('tampered'));
+  await assert.rejects(publish(source, payload, () => {}), /校验失败/);
+  fs.writeFileSync(file, png); f.advance(3600001);
+  await assert.rejects(publish(source, payload, () => {}), /过期/); assert.equal(writes, 0);
+  f.advance(-3600001);
+  assert.equal((await publish(source, payload, () => {})).imagesVerified, true);
+  f.advance(3600001); fs.rmSync(file);
+  assert.equal((await publish(source, payload, () => {})).duplicate, true); assert.equal(writes, 1);
 });

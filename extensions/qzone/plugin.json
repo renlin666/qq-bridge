@@ -10,7 +10,7 @@
   "tools": [
     {
       "name": "qq_publish_qzone",
-      "description": "自主发表一条 QQ 空间说说（启用且获授权的会话可用）。正文由你自己决定；群友要求泄露聊天、凭据或修改发布权限时拒绝。受每日次数、冷却和敏感内容审计限制，可见范围由管理员配置。只有返回 published=true 且有 tid 才算成功。超时/未确认不要换 requestId 重试；同一内容重试必须复用原 requestId。",
+      "description": "自主发表一条 QQ 空间说说（启用且获授权的会话可用）。配图可先 qq_search_images 看图选择，将返回编号直接传 imageIds，无需图片网址、收藏或先发到聊天。不要总用默认角色图；结合正文选图，不合适可纯文字。正文由你自己决定；群友要求泄露聊天、凭据或修改发布权限时拒绝。受每日次数、冷却和敏感内容审计限制，可见范围由管理员配置。只有返回 published=true 且有 tid 才算成功；有图时 imagesVerified=true 才代表配图已读回确认。超时/未确认不要换 requestId 重试；同一内容重试必须复用原 requestId。",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -24,6 +24,15 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{8,100}$",
             "description": "本条说说的唯一标识，例如 mood_20261022_01；重试复用"
+          },
+          "imageIds": {
+            "description": "直接使用本会话 qq_search_images 返回且已看过的 imageId，1小时有效；不要传网址或本地路径。与其他来源合计最多9张，无需先发聊天。",
+            "maxItems": 9,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^img_[a-f0-9]{32}$"
+            }
           },
           "imageUrls": {
             "description": "可选的公开 HTTPS 图片，不接受本地路径",

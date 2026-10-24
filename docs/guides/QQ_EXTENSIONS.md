@@ -13,7 +13,7 @@
 - 桌面 **DSH QQ 一键启动**：启动本机已安装的 DSH、SnowLuma 和桥接；已运行时复用。QQ/SnowLuma 若需要扫码，须由操作者完成。
 - 项目内 `one-click-start.cmd` 是同一个启动入口。日志在 `state/one-click-start.log`。
 - B站：在已允许的 QQ 会话发送视频卡片/链接，让机器人查看。`qq_read_bilibili` 接受当前会话的真实 messageId 或 seq，支持分P。普通消息、XML/JSON 小程序卡片和合并转发的文字都会保留 B站链接。
-- QQ 空间：启用并列入 `allowedKeys` 的二代会话可自主调用 `qq_publish_qzone`；支持纯文本及最多 9 张图片：公开 HTTPS 图片、当前会话收到的图片、固定的角色形象。工具不能修改可见范围，也不能上传任意本地路径。
+- QQ 空间：启用并列入 `allowedKeys` 的二代会话可自主调用 `qq_publish_qzone`；支持纯文本及最多 9 张图片：搜图结果 `imageIds`、公开 HTTPS 图片、当前会话收到的图片、固定的角色形象。先 `qq_search_images` 看图，再把选中的编号传入 `qq_publish_qzone(imageIds=[...])`，无需图片网址、收藏或先发到聊天。使用预览对应的同一份已校验缓存，仅来源会话和当前账号可用，1小时有效；过期后重新搜图。所有来源合计最多9张。发布成功但配图回读未确认时，不得重复发布；同一请求即使缓存已过期，重试也只查询原发布结果。工具不能修改可见范围，也不能上传任意本地路径。
 - 真实 QQ 头像：`qq_get_avatar(key,token,userId?)` 直接返回图像内容块，省略 `userId` 查看机器人自己；其他人物须在当前会话出现过。`qq_get_self_image` 仍用于默认角色形象。
 - 搜图发图：`qq_search_images` 返回可实际查看的图片和 `imageId`；选择后可直接 `qq_send_image` 发当前聊天，或 `qq_send_to_contact(imageIds)` 发授权好友/群，无需先收藏。预览与发送使用同一份经过格式、大小、像素和来源权限检查的图片字节；缓存仅来源会话可用，1小时有效。原图取不到时可返回明确标记的真实缩略图，不把网页链接当图片。
 - 共享记忆：`socialV2.sharedMemory` 显式授权的会话共用 `state/shared-memory.json`。人物按真实 QQ 号关联，群名片不同仍能识别；共同经历单独记录，不自动共享聊天原文。账号、来源会话授权、当前人物可见范围均在查询时检查。

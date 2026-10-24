@@ -29,7 +29,12 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     return { ...cfg, integrations };
   };
   const qzone = createQzoneSocial({ stateDir, getConfig: effectiveConfig, onebot, sessionAllowed, notify: notifyQzone });
-  const publish = createQzonePublisher({ stateDir, getConfig: effectiveConfig, onebot, readMessageImages, readSelfImage, validateImage, fetchImage });
+  const publish = createQzonePublisher({ stateDir, getConfig: effectiveConfig, onebot, readMessageImages, readSelfImage, validateImage, fetchImage,
+    readSearchImage: (key, imageId) => {
+      if (!extensionEnabled('image-search', getConfig())) fail('图片搜索插件未启用', 403);
+      if (!socialHub?.imageForSend) fail('搜图配图读取未就绪', 503);
+      return socialHub.imageForSend(key, imageId).buffer;
+    } });
   function checkScope(body, req) {
     const key = String(body.key ?? '').trim();
     if (!/^(group|private):[1-9]\d*$/.test(key)) fail('key 格式无效');
