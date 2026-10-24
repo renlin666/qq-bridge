@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { BUILTIN_IDS, discoverExtensions, extensionConfig, extensionEnabled, schemaFor, TOOL_RE } from './catalog.js';
 import { createExtensionStorage } from './storage.js';
 
@@ -79,7 +80,7 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
       const call = scopeFor(item.row, scope, signal);
       const result = await item.execute(parsed, call);
       call.assertAuthorized();
-      return mcp ? item.format ? item.format(result) : result?.content ? result : textResult(result) : result;
+      return mcp ? item.format ? item.format(result) : Array.isArray(result?.content) ? result : textResult(result) : result;
     });
   }
   async function activate(descriptor) {
@@ -92,6 +93,12 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
       id: row.id, version: row.manifest.version,
       get config() { return copy(extensionConfig(row.id, getConfig())); },
       storage: createExtensionStorage(stateDir, row.id),
+      dataDirectory: row.manifest.capabilities.includes('storage.sqlite') ? path.join(stateDir, 'extensions', row.id) : undefined,
+      context: Object.freeze({ register(handler) {
+        registering();
+        if (!row.manifest.capabilities.includes('memory.context') || typeof handler !== 'function') fail('上下文能力未授权');
+        row.contextProvider = handler;
+      } }),
       log: (...args) => log('[extension:' + row.id + ']', ...args),
       tools: Object.freeze({ register(name, execute, { toMcp } = {}) {
         registering();
@@ -220,6 +227,18 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
           catch (error) { log('插件消息处理失败', row.id, error.message); }
         }
       }
+    },
+    async collectContext(request, scope) {
+      await ready;
+      const chunks = [];
+      for (const row of rows.values()) {
+        if (!row.contextProvider || row.status !== 'active' || !extensionEnabled(row.id, getConfig())) continue;
+        try {
+          const result = await deadline(row, hookTimeoutMs, signal => row.contextProvider(copy(request), scopeFor(row, scope, signal)));
+          if (typeof result === 'string' && result) chunks.push(result.slice(0, 1200));
+        } catch (error) { log('插件上下文生成失败', row.id, error.message); }
+      }
+      return chunks.join('\n').slice(0, 2000);
     },
     async dispatchCommand(text, scope) {
       await ready;

@@ -1,7 +1,7 @@
 // Only the model-facing view is compacted. Stored messages and console/API data
 // retain the original fields for display, media retrieval and troubleshooting.
 const DEFAULT_FALSE_FIELDS = new Set([
-  'quoteTargetIsSelf', 'isOwner', 'isSelf', 'hasMedia', 'hasForward'
+  'quoteTargetIsSelf', 'isOwner', 'isSelf', 'hasMedia', 'hasForward', 'directAtSelf'
 ]);
 const OPTIONAL_FIELDS = new Set([
   'seq', 'messageId', 'sender', 'userId', 'text', 'plain', 'tail', 'kind',
@@ -43,6 +43,8 @@ function compactMedia(media, canResolveByMessage) {
 export function compactModelMessage(message) {
   if (!isRecord(message)) return message;
   const result = { ...message };
+  // Trusted routing metadata stays local; the model already knows its own identity.
+  delete result.botAccountId;
   // No trimming or truncation: differing plain text can contain resolved quote
   // context, and tail can carry the end of a long message absent from text.
   const seenText = new Set();

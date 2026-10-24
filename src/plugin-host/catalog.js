@@ -3,7 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 export const EXTENSION_API_VERSION = 1;
-export const BUILTIN_IDS = Object.freeze(['bilibili', 'image-search', 'quark', 'qzone']);
+export const BUILTIN_IDS = Object.freeze(['bilibili', 'image-search', 'quark', 'qzone', 'social-memory']);
 export const ID_RE = /^[a-z][a-z0-9-]{0,47}$/;
 export const TOOL_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const clone = value => JSON.parse(JSON.stringify(value));

@@ -1,5 +1,6 @@
 import { biliReferences } from '../../src/bilibili.js';
 import { videoToolResult } from '../../src/bilibili-media.js';
+import { videoPolicy, videoDurationReason, skippedVideo } from '../../src/video-watch-policy.js';
 
 export function activate(ctx) {
   let reading = false;
@@ -8,13 +9,19 @@ export function activate(ctx) {
   ctx.tools.register('qq_read_bilibili', async (args, call) => {
     const message = call.messages.get(args.messageId);
     if (!message) throw Object.assign(new Error('只能读取当前会话已收到的消息，请传真实 messageId 或 seq'), { statusCode: 404 });
+    const policy = videoPolicy(ctx.config);
+    if (message.directAtSelf !== true) return { ok: true, key: call.key, video: skippedVideo('mention_required', policy) };
     const text = `${(message.sharedLinks ?? []).join('\n')}\n${message.text ?? ''}\n${message.plain ?? ''}\n${message.tail ?? ''}`;
     const reference = biliReferences(text)[(args.index ?? 1) - 1];
     if (!reference) throw new Error('这条消息没有对应的 B站视频链接');
-    const cacheKey = JSON.stringify([reference, args.page ?? 1, args.startSeconds ?? 0, args.endSeconds ?? null, args.frameCount ?? 16]);
+    const cacheKey = JSON.stringify([reference, args.page ?? 1, args.startSeconds ?? 0, args.endSeconds ?? null,
+      args.frameCount ?? policy.defaultFrameCount, policy.maxTextChars]);
     const old = cache.get(cacheKey);
     let video;
-    if (old && Date.now() - old.at < 600000) video = old.value;
+    if (old && Date.now() - old.at < 600000) {
+      const blocked = old.value.watchStatus === 'skipped' ? old.value.reason : videoDurationReason(old.value, policy);
+      video = blocked ? skippedVideo(blocked, policy, old.value.totalDuration ?? old.value.duration) : old.value;
+    }
     else {
       if (reading || Date.now() - (lastRead.get(call.key) ?? 0) < 5000) throw Object.assign(new Error('正在读取视频或读取过于频繁，请稍后重试'), { statusCode: 429 });
       reading = true; lastRead.set(call.key, Date.now());

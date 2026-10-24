@@ -26,6 +26,7 @@ import * as socialHub from '../src/social-hub.js';
 import * as imageSearch from '../src/image-search.js';
 import * as memoryPolicy from '../src/qq-memory-policy.js';
 import * as continuation from '../src/output-continuation.js';
+import { directlyMentionsBot } from '../src/video-watch-policy.js';
 import { FLASH_MODELS } from '../plugins/qq-agent-presets/qq-platform-policy.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
@@ -167,7 +168,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     NodeApiClient: class { constructor() { return api; } },
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,
     discoverDshLaunchToken: () => '', unwrap, createTurnCollector,
-    ...continuation, FLASH_MODELS,
+    ...continuation, FLASH_MODELS, directlyMentionsBot,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker,
     ...modelPrices, ...tokenLedger, ...voiceLib, ...stateAcl, ...presetPrompt, ...bilibili, ...integrations, ...socialHub, ...imageSearch, ...memoryPolicy,
     createIntegrations: options => integrations.createIntegrations({ ...options, localRoot: path.join(temp, 'extensions-local') }),

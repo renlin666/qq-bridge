@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness Bridge (qq-bridge)
 
-> This derivative is **0.3.0-rc.1**, introducing the bridge's own project-plugin API v1. See [plugin development](docs/guides/PROJECT_PLUGINS.md), [changes](CHANGELOG.md), and [upstream provenance](UPSTREAM.md). Personal configuration, installed custom roles and runtime state are excluded. Copy `examples/roles/小鲸鱼.md` into `roles/` if you need the public role example.
+> This derivative is **0.3.0-rc.2**, adding local person memory, independent relationships, actual-mention and five-minute video gates, and smaller wake prompts. See [integration and rollback notes](docs/guides/SOCIAL_MEMORY_RELEASE.md), [plugin development](docs/guides/PROJECT_PLUGINS.md), [changes](CHANGELOG.md), and [upstream provenance](UPSTREAM.md). Personal configuration, installed custom roles and runtime state are excluded. Copy `examples/roles/小鲸鱼.md` into `roles/` if you need the public role example.
 
 > Connect QQ messages to DeepSeek Harness (DSH) agents: QQ friends/groups become DSH conversations, and agent replies (including questions and tool approvals) are sent back to QQ.
 

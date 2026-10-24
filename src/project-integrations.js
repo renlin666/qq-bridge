@@ -7,6 +7,8 @@ import { createQzoneSocial } from './qzone-social.js';
 import { createQzonePublisher } from './qzone-publisher.js';
 import { createPluginHost } from './plugin-host/index.js';
 import { extensionConfig, extensionEnabled } from './plugin-host/catalog.js';
+import { biliReferences } from './bilibili.js';
+import { videoPolicy, videoDurationReason, skippedVideo } from './video-watch-policy.js';
 
 export const INTEGRATION_PREFIX = '/api/socialV2/integrations/';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -35,12 +37,20 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     return key;
   }
   const scope = (body, req) => ({ key: checkScope(body, req), assertAuthorized: () => checkScope(body, req) });
-  const host = createPluginHost({ root: projectRoot, localRoot, stateDir, getConfig, log, services: {
-    readMessage(key, messageId) {
+  function readMessage(key, messageId) {
       const st = getConversation(key);
       const ref = String(messageId ?? '');
       return [...(st?.recentMessages ?? []), ...(st?.unread ?? [])]
         .find(message => String(message.seq) === ref || String(message.messageId) === ref) ?? null;
+  }
+  const host = createPluginHost({ root: projectRoot, localRoot, stateDir, getConfig, log, services: {
+    readMessage,
+    'memory.policy'(_key, _args, authorize) {
+      authorize();
+      const cfg = getConfig();
+      const extra = extensionConfig('social-memory', cfg);
+      return { people: [...new Set([...(cfg.allow?.private ?? []), ...(extra.people ?? []), cfg.ownerQQ].filter(Boolean).map(String))],
+        groups: (cfg.allow?.groups ?? []).map(String) };
     },
     sendMessage(key, messages, requestId, authorize) {
       if (!socialHub) fail('发送服务未就绪', 503);
@@ -51,10 +61,20 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       const result = await safeFetch(args.url, Math.max(1, Math.min(1024 * 1024, Number(args.maxBytes) || 128 * 1024)));
       authorize(); return { statusCode: result.statusCode, body: result.body, url: result.url };
     },
-    'media.bilibili'(_key, { reference, ...options }, authorize) {
+    async 'media.bilibili'(key, { reference, ...options }, authorize) {
       authorize();
       if (!extensionEnabled('bilibili', getConfig())) fail('B站解析已关闭', 403);
-      return readVideo(reference, { ...options, media: extensionConfig('bilibili', getConfig()), stateDir });
+      const media = extensionConfig('bilibili', getConfig());
+      const policy = videoPolicy(media);
+      const message = readMessage(key, options.messageId);
+      if (!message || message.directAtSelf !== true) return skippedVideo('mention_required', policy);
+      const refs = biliReferences(`${(message.sharedLinks ?? []).join('\n')}\n${message.text ?? ''}\n${message.plain ?? ''}\n${message.tail ?? ''}`);
+      if (!refs.includes(reference)) fail('视频链接不属于当前消息', 403);
+      const result = await readVideo(reference, { ...options, media, stateDir });
+      authorize();
+      const current = videoPolicy(extensionConfig('bilibili', getConfig()));
+      const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current);
+      return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration) : result;
     },
     'drive.inspect'(_key, { action, magnet }, authorize) {
       authorize();
@@ -95,6 +115,14 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     sendJson({ ok: false, error: '未知扩展功能' }, 404); return true;
   }
   handle.host = host;
+  handle.contextFor = async key => {
+    const st = getConversation(key);
+    const message = [...(st?.recentMessages ?? [])].reverse().find(m => !m.isSelf && m.userId && m.botAccountId);
+    if (!message) return '';
+    return host.collectContext({ ...message, query: String(message.plain ?? message.text ?? '').slice(0, 200) }, {
+      key, assertAuthorized() { if (!sessionAllowed(key)) fail('记忆会话权限已撤销', 403); }
+    });
+  };
   handle.ready = host.ready;
   handle.pollQzone = () => backgroundAllowed() ? qzone.poll() : Promise.resolve();
   handle.close = () => host.close();

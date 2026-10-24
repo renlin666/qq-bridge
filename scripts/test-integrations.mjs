@@ -73,9 +73,9 @@ function fixture(t, override = {}) {
   const cfg = { integrations: { bilibili: { enabled: true }, quark: { enabled: true }, qzone: { enabled: true, allowedKeys: ['group:456'], visibility: 4, maxPerDay: 3, minIntervalSeconds: 60 } } };
   const handler = createIntegrations({
     stateDir: dir, getConfig: () => cfg, sessionAllowed: key => key === 'group:456', tokenOk: (key, token) => key === 'group:456' && token === 'valid',
-    getConversation: () => ({ recentMessages: [{ seq: 1, messageId: '99', sharedLinks: [magnet, `https://www.bilibili.com/video/${bv}`] }] }),
+    getConversation: () => ({ recentMessages: [{ seq: 1, messageId: '99', directAtSelf: true, sharedLinks: [magnet, `https://www.bilibili.com/video/${bv}`] }] }),
     onebot: async (action, params) => { calls.push({ action, params }); return { tid: 'fixture-tid' }; },
-    readVideo: async reference => { calls.push({ reference }); return { title: 'fixture' }; },
+    readVideo: async reference => { calls.push({ reference }); return { title: 'fixture', duration: 20 }; },
     readMagnet: async value => { calls.push({ magnet: value }); return { files: ['fixture.txt'] }; },
     ...override
   });
