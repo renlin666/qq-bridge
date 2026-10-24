@@ -276,6 +276,9 @@
   "integrations": {
     "bilibili": {
       "enabled": true,
+      "maxVideoSeconds": 300,
+      "defaultFrameCount": 8,
+      "maxTextChars": 6000,
       "ffmpegPath": "",
       "transcribe": true,
       "modelDirectory": "",
@@ -298,5 +301,10 @@
       "debugPort": 19327
     }
   },
-  "extensions": {}
+  "extensions": {
+    "social-memory": {
+      "enabled": false,
+      "config": { "people": [] }
+    }
+  }
 }

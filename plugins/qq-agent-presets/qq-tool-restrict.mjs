@@ -204,7 +204,7 @@ export function apply(ctx) {
   // global guide asking the model to use tools that this preset cannot expose.
   ctx.systemPrompt?.section({
     name: 'meow-memory:guide', order: 130,
-    text: '本 QQ 会话只使用桥接记忆：qq_memory_* 保存当前会话摘要，qq_shared_memory_* 保存已授权共享摘要。原生 memory_* 不可用，不尝试或重试，也不运行喵记忆反思/dream；不必重复解释工具权限。',
+    text: '本 QQ 会话使用桥接记忆：qq_social_memory_* 按原消息绑定人物、索引和正文，qq_social_relationship_event 记录有证据的互动；qq_memory_* 保存会话摘要，qq_shared_memory_* 保存获准共享摘要。原生 memory_* 不可用，不尝试或重试，不运行喵记忆反思/dream。',
   })
 
   // 2) 执行期白名单：任何不在允许范围内的工具调用都会被拒绝。

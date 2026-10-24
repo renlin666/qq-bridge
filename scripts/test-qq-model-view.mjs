@@ -23,6 +23,13 @@ test('short messages retain identity and text once, including zero-valued timest
   });
 });
 
+test('internal bot routing metadata is omitted while direct mentions remain visible', () => {
+  const source = { text: '看这个视频', botAccountId: '10001', directAtSelf: true };
+  assert.deepEqual(compactModelMessage(source), { text: source.text, directAtSelf: true });
+  assert.equal(source.botAccountId, '10001');
+  assert.deepEqual(compactModelMessage({ directAtSelf: false }), {});
+});
+
 test('long messages, resolved quotes and whitespace differences are not truncated or deduplicated', () => {
   const message = {
     seq: 22, text: '群友说：' + '很长的正文'.repeat(100),

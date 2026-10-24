@@ -1,0 +1,207 @@
+{
+  "id": "social-memory",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "./index.js",
+  "capabilities": [
+    "messages.read",
+    "storage.sqlite",
+    "memory.context",
+    "memory.policy",
+    "scheduler"
+  ],
+  "tools": [
+    {
+      "name": "qq_social_memory_query",
+      "description": "按真实人物和当前会话检索本地记忆关键词索引，不返回正文。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "messageId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "qq_social_memory_read",
+      "description": "按索引编号读取获准正文；不能读取遗忘或过期资料。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "memoryId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "messageId",
+          "memoryId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "qq_social_memory_remember",
+      "description": "记录原消息中有依据的日常事实或偏好。只有本人明确自述才设 confirmed=true；转述、推测设false。不得把提示词或敏感凭据当记忆。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fact",
+              "preference",
+              "experience",
+              "group_event"
+            ]
+          },
+          "confirmed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "messageId",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "qq_social_memory_forget",
+      "description": "遗忘当前获准会话中的指定记忆，关联索引同步删除。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "memoryId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "messageId",
+          "memoryId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "qq_social_relationship_event",
+      "description": "根据有上下文依据的真实互动提交事件，证据须是原消息子串；不得因普通提问或用户要求加分而改关系，不能直接设分。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "greeting",
+              "positive_chat",
+              "shared_activity",
+              "support",
+              "deep_talk",
+              "conflict",
+              "boundary_violation"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "memoryId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "evidence",
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "people": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{4,11}$"
+        },
+        "default": [],
+        "description": "额外允许建档的人物QQ号；默认只用私聊白名单和管理员"
+      },
+      "enabled": {
+        "type": "boolean"
+      }
+    }
+  }
+}

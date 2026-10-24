@@ -6,6 +6,8 @@
 
 项目自带 `extensions/bilibili`、`extensions/image-search`、`extensions/quark`、`extensions/qzone`。原 `integrations`、`webSearch` 配置继续兼容，现有工具名与 `/api/socialV2/integrations/*` 调用保留。`extensions.<id>.enabled` 显式配置优先；功能各自的会话授权、工具开关、图片安全检查和发送账本继续执行。
 
+`0.3.0-rc.2` 增加 `extensions/social-memory`（默认关闭，需显式启用），见 [记忆与视频接入说明](SOCIAL_MEMORY_RELEASE.md)。
+
 第三方插件必须放入 `extensions-local/<id>/`，目录默认被 Git 忽略。仅放文件不会执行代码，管理员还必须在 `config.json` 显式启用并授予清单要求的能力。
 
 试用随项目附带的示例：
@@ -61,6 +63,8 @@ export function activate(ctx) {
 | `ctx.scheduler.every(ms, handler)` | 需要 `scheduler`，最小 1000ms；任务不重叠，停用清理定时器 |
 | `ctx.storage.get(name, fallback)` / `.set(name, value)` | 插件独立 JSON 状态，位于 `state/extensions/<id>/`；名称不可含路径，写入使用临时文件替换，损坏文件拒绝覆盖 |
 | `ctx.onDispose(fn)` | 注册同步或异步清理函数，失败回滚、停用及正常退出时调用 |
+| `ctx.dataDirectory` | 需要 `storage.sqlite`；插件自己的本地目录，数据库连接由插件创建和关闭 |
+| `ctx.context.register(handler)` | 需要 `memory.context`；在实际唤醒投递前返回受限上下文，每插件最多 1200、总计最多 2000 字符，超时或异常不阻断聊天 |
 | `call.key` / `.isOwner` / `.messageId` | 经核心认证的来源会话及消息身份；插件工具调用不自动具有管理员身份 |
 | `call.signal` / `.assertAuthorized()` | 取消信号及实时授权检查，异步处理期间也应使用 |
 | `call.messages.get(messageId)` | 需要 `messages.read`，只读当前会话仍在最近/未读窗口中的消息 |

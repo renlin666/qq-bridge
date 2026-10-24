@@ -193,8 +193,8 @@ test('built-in B站/image tools format actual multimodal content in the bridge h
   const f = fixture(t);
   const bridge = createIntegrations({ stateDir: f.stateDir, getConfig: () => ({}), onebot: async () => ({}),
     sessionAllowed: () => true, tokenOk: () => true,
-    getConversation: () => ({ recentMessages: [{ messageId: 99, sharedLinks: ['https://www.bilibili.com/video/BV1xx411c7mD'] }] }),
-    readVideo: async () => ({ title: 'fixture', transcript: 'actual speech', frames: [{ seconds: 8.25, mimeType: 'image/jpeg', data: 'fixture-base64' }] }),
+    getConversation: () => ({ recentMessages: [{ messageId: 99, directAtSelf: true, sharedLinks: ['https://www.bilibili.com/video/BV1xx411c7mD'] }] }),
+    readVideo: async () => ({ title: 'fixture', duration: 20, transcript: 'actual speech', frames: [{ seconds: 8.25, mimeType: 'image/jpeg', data: 'fixture-base64' }] }),
     socialHub: { handle: async () => ({ images: [{ imageId: 'image-1' }], previews: [{ mimeType: 'image/png', data: 'preview-bytes' }] }) },
   });
   t.after(() => bridge.close());

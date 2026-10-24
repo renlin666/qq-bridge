@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readBilibili } from './bilibili.js';
 import { safeFetch, safeFetchMedia } from './safe-fetch.js';
+import { videoPolicy, videoDurationReason, skippedVideo } from './video-watch-policy.js';
 
 export function planFrameTimes(duration, { startSeconds = 0, endSeconds = duration, frameCount = 16 } = {}) {
   const start = Number(startSeconds), end = Math.min(Number(endSeconds), duration);
@@ -103,9 +104,12 @@ async function trimCache(root, keep) {
 }
 
 export async function readBilibiliMedia(reference, options = {}) {
-  const video = await readBilibili(reference, options);
   const media = options.media ?? {};
-  const times = planFrameTimes(Number(video.duration), options);
+  const policy = videoPolicy(media);
+  const video = await readBilibili(reference, { ...options, maxVideoSeconds: policy.maxVideoSeconds, maxTextChars: policy.maxTextChars });
+  const blocked = video.watchBlockReason || videoDurationReason(video, policy);
+  if (blocked) return skippedVideo(blocked, policy, video.totalDuration ?? video.duration);
+  const times = planFrameTimes(Number(video.duration), { ...options, frameCount: options.frameCount ?? policy.defaultFrameCount });
   video.frames = [];
   video.visualStatus = 'unavailable';
   video.transcriptStatus = video.subtitle ? 'subtitle-available' : 'unavailable';
@@ -158,8 +162,8 @@ export async function readBilibiliMedia(reference, options = {}) {
         await fs.writeFile(transcriptFile, JSON.stringify(transcript));
         await fs.unlink(wav);
       }
-      video.transcript = transcript.text.slice(0, 48000);
-      video.transcriptTruncated = transcript.text.length > 48000;
+      video.transcript = transcript.text.slice(0, policy.maxTextChars);
+      video.transcriptTruncated = transcript.text.length > policy.maxTextChars;
       video.audioSeconds = transcript.audioSeconds;
       video.transcriptStatus = 'available';
       video.transcriptSource = 'local-sensevoice-asr';
