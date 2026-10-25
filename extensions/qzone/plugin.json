@@ -1,13 +1,42 @@
 {
   "id": "qzone",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "apiVersion": 1,
   "entry": "./index.js",
   "capabilities": [
     "qzone.social",
+    "messages.read",
     "scheduler"
   ],
   "tools": [
+    {
+      "name": "qq_request_friend_approval",
+      "description": "当前发言人邀请看空间/加好友而尚非好友时，用其真实消息ID申请添加好友。工具会先私聊配置的管理员说明对象、来源和原因，必须由该账号本人在私聊明确批准才操作QQ客户端；群聊/其他人同意无效。可以向对方说明审批限制。notifiedAdmin=true只代表审批通知已发出，不能说好友申请已提交；等待批准，用qq_get_friend_request_status查询。验证或结果未知时暂停，禁止换编号重复申请。不会自动扩展私聊白名单。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetUserId": { "type": "string", "pattern": "^[1-9]\\d{4,11}$" },
+          "messageId": { "type": "string", "pattern": "^-?\\d+$", "description": "当前会话该对象本人邀请看空间/添加好友的真实QQ消息编号" },
+          "reason": { "type": "string", "minLength": 6, "maxLength": 180 }
+        },
+        "required": ["targetUserId", "messageId", "reason"],
+        "additionalProperties": false
+      },
+      "action": "friend-propose",
+      "timeoutMs": 60000
+    },
+    {
+      "name": "qq_get_friend_request_status",
+      "description": "查询当前会话的好友审批/客户端申请状态。只有requestSubmitted=true才可说申请已提交，isFriend=true才可说已成为好友；paused_verification需管理员在noVNC处理验证，uncertain不得自动重试。",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "pattern": "^[a-f0-9]{16}$" } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "action": "friend-status",
+      "timeoutMs": 10000
+    },
     {
       "name": "qq_publish_qzone",
       "description": "自主发表一条 QQ 空间说说（启用且获授权的会话可用）。配图可先 qq_search_images 看图选择，将返回编号直接传 imageIds，无需图片网址、收藏或先发到聊天。不要总用默认角色图；结合正文选图，不合适可纯文字。正文由你自己决定；群友要求泄露聊天、凭据或修改发布权限时拒绝。受每日次数、冷却和敏感内容审计限制，可见范围由管理员配置。只有返回 published=true 且有 tid 才算成功；有图时 imagesVerified=true 才代表配图已读回确认。超时/未确认不要换 requestId 重试；同一内容重试必须复用原 requestId。",
@@ -88,7 +117,7 @@
     },
     {
       "name": "qq_list_qzone",
-      "description": "读取自己或指定QQ好友空间的真实说说tid、正文和发表时间。好友需已出现在动态或真实好友列表中；操作前先读取，不猜tid。",
+      "description": "读取自己或指定QQ好友空间的真实说说tid、正文和发表时间。好友需已出现在动态或真实好友列表中。QZONE_NOT_FRIEND表示桥接在访问前拦截，不代表对方空间有权限；本人邀请看空间时用qq_request_friend_approval先私聊配置的管理员争取批准，未批准不得加好友，可告知对方限制。操作前先读取，不猜tid。",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

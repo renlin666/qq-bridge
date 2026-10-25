@@ -1,9 +1,10 @@
 import { isPeakAt, DEFAULT_PRICE_TABLE } from './model-prices.js';
+import { videoMessageView } from './qq-model-view.js';
 
 export const PEAK_ECONOMY_DEFAULTS = Object.freeze({
   enabled: false, mode: 'auto', probability: 0.2, minIntervalMs: 900000, replyChars: 80
 });
-const protectedReasons = new Set(['private', 'atMention', 'bootstrap', 'admin', 'poke']);
+const protectedReasons = new Set(['private', 'atMention', 'bootstrap', 'admin', 'poke', 'video']);
 
 export function peakEconomyConfig(value) {
   const c = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -37,7 +38,8 @@ export function decidePeakWake({ key, reason, unread = [], lastAcceptedAt = 0, c
   table = DEFAULT_PRICE_TABLE, random = Math.random }) {
   const status = peakEconomyStatus(config, now, table);
   const protectedWake = key.startsWith('private:') || protectedReasons.has(String(reason).split(':')[0])
-    || unread.some(message => message?.directAtSelf === true || message?.quoteTargetIsSelf === true);
+    || unread.some(message => message?.directAtSelf === true || message?.quoteTargetIsSelf === true
+      || (!message?.isSelf && videoMessageView({ plain: message?.plain, sharedLinks: message?.sharedLinks }).videoWatch));
   if (!status.active || protectedWake) return { ...status, allowed: true, protectedWake };
   const last = Number(lastAcceptedAt);
   const elapsed = Number.isFinite(last) && last > 0 ? Math.max(0, now - last) : Infinity;

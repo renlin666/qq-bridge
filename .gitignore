@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 .npm-cache/
+__pycache__/
+*.pyc
 
 # Runtime state and local config (never publish)
 state/
@@ -79,3 +81,6 @@ audio/
 /roles/小鲸鱼.md
 /assets/deepseek娘.png
 
+
+# Private production incident snapshots.
+/docs/guides/MEMORY_IMPRESSION_ROUTING_FIX_*.md

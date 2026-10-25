@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { keywordsFrom, tokenize } from '../../lib/social-memory/src/text.js';
 
+export const legacyMemoryId = (bot, scope, origin, sourceId) => 'legacy:' + crypto.createHash('sha256').update(JSON.stringify([bot, scope, origin, String(sourceId)])).digest('hex');
+
 export function indexMatches(index, query) {
   const tokens = tokenize(query);
   return !tokens.length || tokens.some(token => index.keywords.includes(token));
@@ -23,7 +25,7 @@ export class LegacyMemoryStore {
       const upsert = this.db.prepare(`INSERT INTO legacy_memory VALUES (?,?,?,?,?,?,1)
         ON CONFLICT(id) DO UPDATE SET content=excluded.content,keywords=excluded.keywords,active=1`);
       for (const entry of entries) {
-        const id = 'legacy:' + crypto.createHash('sha256').update(JSON.stringify([bot, scope, entry.origin, entry.sourceId])).digest('hex');
+        const id = legacyMemoryId(bot, scope, entry.origin, entry.sourceId);
         upsert.run(id, bot, scope, entry.origin, entry.content, JSON.stringify(keywordsFrom(entry.content)));
       }
       this.db.exec('COMMIT');

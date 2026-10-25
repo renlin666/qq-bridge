@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import { test } from 'node:test';
 import { z } from 'zod';
 import { registerIntegrationTools } from '../src/mcp-qq-integrations.js';
+import { socialEventsSchema } from '../src/social-event-metadata.js';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -99,6 +100,7 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
   };
   vm.runInNewContext(source, {
     McpServer,
+    socialEventsSchema,
     StdioServerTransport: class {},
     z,
     URL,
@@ -127,6 +129,21 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
 // 回归（issue #24）：`qq_wait_for_messages` 以前走全局 fetch（undici 自带 300s headersTimeout），
 // 而沉睡前观察的预算就是 300s —— 第 301 秒必然 `fetch failed`，桥接侧却还在跑满预算占着
 // activeWaits，AI 只能重试烧 token。现在必须走 node:http 长轮询（没有默认响应超时）。
+test('normal reply MCP requires a decision and forwards social metadata without merging it into QQ text', async () => {
+  const requests = [];
+  const callTool = loadSnowlumaTools(async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return Response.json({ ok: true, sent: 1, socialEventReceipts: [{ status: 'applied' }] });
+  }, {});
+  const base = { key: 'group:456', token: 'fixture-token', messages: '虚构回复' };
+  await assert.rejects(callTool('qq_send_message', base)); assert.equal(requests.length, 0);
+  const event = { messageId: 'fixture', kind: 'support', evidence: '虚构证据' };
+  const result = await callTool('qq_send_message', { ...base, socialEvents: [event] });
+  assert.equal(result.isError, undefined); assert.deepEqual(requests[0].body.socialEvents, [event]);
+  assert.equal(requests[0].body.messages, '虚构回复');
+  assert.equal(JSON.parse(result.content[0].text).socialEventReceipts[0].status, 'applied');
+});
+
 test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', async () => {
   const { EventEmitter } = await import('node:events');
   const { PassThrough } = await import('node:stream');

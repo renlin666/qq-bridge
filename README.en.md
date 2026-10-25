@@ -1,8 +1,10 @@
 # QQ ↔ DeepSeek Harness Bridge (qq-bridge)
 
-> **0.3.0-rc.3** adds configurable peak-hour wake throttling, keyword access to existing local memories, and per-person minimum relationship tiers. See [configuration and validation](docs/guides/PEAK_ECONOMY_AND_MEMORY.md).
+QQ agent bridge for DeepSeek Harness through SnowLuma / OneBot. It provides project-owned extensions, scoped long-term memory, relationship policies, receipt-verified messaging and media tools.
 
-> This derivative is **0.3.0-rc.3**, with local person memory, independent relationships, actual-mention and five-minute video gates, and smaller wake prompts. See [earlier integration and rollback notes](docs/guides/SOCIAL_MEMORY_RELEASE.md), [plugin development](docs/guides/PROJECT_PLUGINS.md), [changes](CHANGELOG.md), and [upstream provenance](UPSTREAM.md). Personal configuration, installed custom roles and runtime state are excluded. Copy `examples/roles/小鲸鱼.md` into `roles/` if you need the public role example.
+**Current version: 0.3.0-rc.8, memory extension 1.6.0, project plugin API v1.** Memory is bound to real user IDs and authorized conversations, with indexed historical retrieval, topic filters, unconfirmed observations, administrator review and source-linked person excerpts. Model confirmation requests are checked against explicit self-statements. Video reading defaults to a 180-second whole-video limit; longer videos require a verified permission message. Linux deployment supports streaming downloads and bounded media resources.
+
+See [memory 1.6](docs/guides/MEMORY_V16.md), [plugin development](docs/guides/PROJECT_PLUGINS.md), [Linux deployment](docs/guides/LINUX_LOW_MEMORY.md), [changes](CHANGELOG.md), and [upstream provenance](UPSTREAM.md). Requires Node.js ≥22.13 and separately configured DSH, OneBot client components and model access. Personal configuration, credentials, installed roles and runtime data are excluded. Tests do not establish long-term stability or natural conversation quality.
 
 > Connect QQ messages to DeepSeek Harness (DSH) agents: QQ friends/groups become DSH conversations, and agent replies (including questions and tool approvals) are sent back to QQ.
 

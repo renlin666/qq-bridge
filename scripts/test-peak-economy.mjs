@@ -32,7 +32,8 @@ test('设置严格校验并保留零值和未修改项', () => {
 test('峰时只压可选唤醒，@在anyMessage模式下仍保留；谷时不追加限制', () => {
   const decide = extra => decidePeakWake({ key: 'group:456', reason: 'anyMessage', config: peak, random: () => 0, ...extra });
   assert.equal(decide().allowed, false);
-  for (const reason of ['private', 'atMention', 'poke', 'admin', 'bootstrap']) assert.equal(decide({ reason }).allowed, true);
+  for (const reason of ['private', 'atMention', 'poke', 'admin', 'bootstrap','video']) assert.equal(decide({ reason }).allowed, true);
+  assert.equal(decide({unread:[{plain:'[视频]'}]}).allowed,true,'合批原因为普通消息时仍不能漏掉新视频');
   assert.equal(decide({ key: 'private:123' }).allowed, true);
   for (const evidence of [{ directAtSelf: true }, { quoteTargetIsSelf: true }]) assert.equal(decide({ unread: [evidence] }).allowed, true);
   assert.equal(decide({ config: { ...peak, mode: 'off' }, lastAcceptedAt: Date.now() }).allowed, true);

@@ -10,6 +10,10 @@ import { extensionConfig, extensionEnabled } from './plugin-host/catalog.js';
 import { biliReferences } from './bilibili.js';
 import { videoPolicy, videoDurationReason, skippedVideo, videoApproval } from './video-watch-policy.js';
 import { legacyMemoryEntries } from './legacy-memory-source.js';
+import { parseSocialEvents } from './social-event-metadata.js';
+import { createFriendApproval } from './friend-approval.js';
+import { readMemoryLibrary } from './memory-library.js';
+import { readRelationships } from './relationship-view.js';
 
 export const INTEGRATION_PREFIX = '/api/socialV2/integrations/';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -29,6 +33,9 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     return { ...cfg, integrations };
   };
   const qzone = createQzoneSocial({ stateDir, getConfig: effectiveConfig, onebot, sessionAllowed, notify: notifyQzone });
+  const friendApproval = createFriendApproval({ stateDir, getConfig: effectiveConfig, getConversation, sessionAllowed, onebot, log,
+    notify: (key, messages, requestId, authorize) => socialHub?.sendLocal(key, messages, requestId, authorize)
+      ?? fail('管理员私聊通知服务未就绪', 503) });
   const publish = createQzonePublisher({ stateDir, getConfig: effectiveConfig, onebot, readMessageImages, readSelfImage, validateImage, fetchImage,
     readSearchImage: (key, imageId) => {
       if (!extensionEnabled('image-search', getConfig())) fail('图片搜索插件未启用', 403);
@@ -64,7 +71,7 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       authorize();
       const cfg = getConfig();
       const extra = extensionConfig('social-memory', cfg);
-      return { people: [...new Set([...(cfg.allow?.private ?? []), ...(extra.people ?? []), cfg.ownerQQ].filter(Boolean).map(String))],
+      return { botAccountId:String(getSelfId()||''),ownerQQ:String(cfg.ownerQQ||''),enabled:cfg.socialV2?.tools?.memory!==false,people: cfg.socialV2?.tools?.memory === false ? [] : [...new Set([...(cfg.allow?.private ?? []), ...(extra.people ?? []), cfg.ownerQQ].filter(Boolean).map(String))],
         groups: (cfg.allow?.groups ?? []).map(String), minimumTiers: extra.minimumTiers ?? {} };
     },
     sendMessage(key, messages, requestId, authorize) {
@@ -94,7 +101,7 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       authorize();
       const current = videoPolicy(extensionConfig('bilibili', getConfig()));
       const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current, !!approvals());
-      return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration)
+      return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration, result)
         : { ...result, watchAuthorization: approved ? 'explicit-approval' : 'duration-limit' };
     },
     'drive.inspect'(_key, { action, magnet }, authorize) {
@@ -106,6 +113,10 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     'images.search'(key, args, authorize) { return socialHub?.handle('image-search', key, args, authorize) ?? fail('搜图服务未就绪', 503); },
     'images.send'(key, args, authorize) { return socialHub?.handle('image-send', key, args, authorize) ?? fail('发送服务未就绪', 503); },
     async 'qzone.social'(key, { action, ...args }, authorize) {
+      if (action === 'friend-poll') { if (backgroundAllowed()) { authorize(); friendApproval.poll(); } return null; }
+      if (action === 'friend-message') return friendApproval.incoming(key, args.message, authorize);
+      if (action === 'friend-propose') return friendApproval.propose(key, args, authorize);
+      if (action === 'friend-status') { authorize(); return friendApproval.status(key, args); }
       if (action === 'poll') {
         if (backgroundAllowed()) { authorize(); await qzone.poll(); }
         return null;
@@ -115,6 +126,29 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     },
   } });
   async function handle({ req, url, readBody, sendJson }) {
+    if (url.pathname === '/api/memory-library/review') {
+      const authorize=key=>{
+        if(req.headers['x-agent-token']||req.headers['x-agent-call']!==undefined)fail('记忆核实仅管理员可用',403);
+        if(!extensionEnabled('social-memory',getConfig())||getConfig().socialV2?.tools?.memory===false)fail('记忆功能已关闭',403);
+        if(key&&!sessionAllowed(key))fail('记忆会话不在当前白名单',403);
+      };
+      authorize();
+      if(req.method!=='POST'){sendJson({ok:false,error:'核实操作需要 POST'},405);return true;}
+      const body=await readBody();
+      try{sendJson(await host.invokeAdmin('social-memory','review',body,authorize));}
+      catch(error){error.statusCode??=({CONFLICT:409,FORBIDDEN:403,PERSON_DISABLED:403,NOT_FOUND:404,INVALID_INPUT:400,INVALID_CONTEXT:400}[error.code]||400);throw error;}
+      return true;
+    }
+    if(url.pathname==='/api/relationships'){
+      if(req.headers['x-agent-token']||req.headers['x-agent-call']!==undefined)fail('关系管理视图仅控制台可用',403);
+      if(req.method!=='GET'){sendJson({ok:false,error:'关系数据只读'},405);return true;}
+      sendJson(readRelationships(stateDir,url.searchParams));return true;
+    }
+    if (url.pathname === '/api/memory-library') {
+      if (req.headers['x-agent-token'] || req.headers['x-agent-call'] !== undefined) fail('记忆库管理视图仅控制台可用',403);
+      if (req.method !== 'GET') { sendJson({ok:false,error:'只支持只读查看'},405); return true; }
+      sendJson(readMemoryLibrary(stateDir,url.searchParams)); return true;
+    }
     if (url.pathname === '/api/extensions/catalog' && req.method === 'GET') {
       sendJson({ tools: await host.catalog() }); return true;
     }
@@ -136,6 +170,23 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     sendJson({ ok: false, error: '未知扩展功能' }, 404); return true;
   }
   handle.host = host;
+  handle.parseSocialEvents = parseSocialEvents;
+  handle.recordSocialEvents = async (key, events, assertAuthorized) => {
+    const receipts = [];
+    for (const event of events) {
+      try {
+        assertAuthorized();
+        const result = await host.callTool('qq_social_relationship_event', event, { key, assertAuthorized });
+        const data = JSON.parse(result.content[0].text);
+        receipts.push({ messageId: event.messageId, kind: event.kind,
+          status: data.duplicate ? 'duplicate' : data.applied ? 'applied' : 'ignored',
+          ...(data.reason ? { reason: data.reason } : {}) });
+      } catch (error) {
+        receipts.push({ messageId: event.messageId, kind: event.kind, status: 'rejected', reason: String(error.message).slice(0, 180) });
+      }
+    }
+    return receipts;
+  };
   handle.contextFor = async key => {
     const st = getConversation(key);
     const recent = st?.unread?.length ? st.unread.slice(-12) : (st?.recentMessages ?? []).slice(-6);

@@ -88,7 +88,9 @@ test('autonomy limits and the observation escape hatch stay described', () => {
     // [SILENT] 是桥接的退出标记，误用会静默吞掉回复。
     '不要用 [SILENT]',
     // 记忆面
-    '【记忆卫生】', 'qq_memory_append', 'qq_memory_query', 'qq_memory_remove', 'qq_memory_clear',
+    '【记忆卫生】', 'qq_memory_append', 'qq_social_memory_query', 'qq_social_memory_read', 'qq_social_memory_remember', 'qq_social_memory_forget', 'qq_memory_remove', 'qq_memory_clear',
+    // 群友长期印象必须落人物档案，不能回流到 memberImpression（2026-10-25 实测模型只调 qq_memory_append）。
+    '长期印象属于人物档案', 'qq_social_memory_remember(kind="experience"', 'memberImpression 只在没有真实 QQ 号时用',
     // 黑话面
     'qq_slang_query', 'qq_slang_submit', '不重复提交',
     // 频率上限

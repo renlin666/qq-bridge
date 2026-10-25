@@ -35,10 +35,13 @@ export function videoApproval(message, messages, config, approvalMessageId) {
   }) ?? null;
 }
 
-export function skippedVideo(reason, policy, duration) {
+export function skippedVideo(reason, policy, duration, metadata = {}) {
   return { watchStatus: 'skipped', reason, retryable: false, maxVideoSeconds: policy.maxVideoSeconds,
+    source: metadata.source || 'bilibili', title: String(metadata.title || '').slice(0,500),
+    description: String(metadata.description || '').slice(0,1000),
+    responseMode: 'metadata-comment-only', requiresUnwatchedDisclosure: true,
     ...(Number.isFinite(Number(duration)) && Number(duration) > 0 ? { duration: Number(duration) } : {}),
     frames: [], visualStatus: 'not-read', transcriptStatus: 'not-read',
-    limit: reason === 'duration_exceeded' ? `整段视频超过${policy.maxVideoSeconds}秒，尚无指定账号对该条视频的许可；不观看，不通过截取片段绕过。`
-      : '无法取得有效视频时长，暂不能抽帧观看；不得声称已观看。' };
+    limit: (reason === 'duration_exceeded' ? `整段视频超过${policy.maxVideoSeconds}秒，尚无指定账号对该条视频的许可；不观看，不通过截取片段绕过。`
+      : '无法取得有效视频时长，暂不能观看。') + '仍需回应分享者，明确说明“没看视频，只看标题”等；只评价已知标题/简介，不编造情节、声音或结局。' };
 }

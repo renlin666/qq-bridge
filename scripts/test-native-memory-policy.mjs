@@ -59,6 +59,38 @@ test('absent optional endpoint is cached briefly, while an unknown session is an
   await assert.rejects(invalid.sync('qq'), /未确认/);
 });
 
+test('405 is optional absence only after authenticated inventory confirms it; installation is detected again', async () => {
+  let clock=0,installed=false,supported=false,inventoryReads=0,policyWrites=0;
+  const policy=createQqMemoryPolicy({now:()=>clock,request:async(url,init)=>{
+    const payload=JSON.parse(init.body);
+    if(url==='/api/pluginManager/listPlugins'){
+      inventoryReads++;return ok({type:'server-response',rpcId:payload.rpcId,result:{ok:true,value:installed?[{moduleName:'meow-memory',enabled:true}]:[{moduleName:'qq-agent-presets',enabled:true}]}});
+    }
+    policyWrites++;
+    return supported?ok({ok:true,...payload}):{ok:false,status:405,json:async()=>({})};
+  }});
+  assert.deepEqual(await policy.sync('qq'),{applied:false,unavailable:true,reason:'plugin_absent'});
+  await policy.sync('qq');assert.equal(policyWrites,1);assert.equal(inventoryReads,1);
+  clock=60001;installed=true;await assert.rejects(policy.sync('qq'),/未确认.*405/);
+  supported=true;assert.equal((await policy.sync('qq')).applied,true);assert.equal(inventoryReads,2);
+});
+
+test('405 with loaded plugins, invalid inventory, failed discovery or unknown sessions stays an error', async () => {
+  for(const value of [[{moduleName:'/plugins/meow-memory/index.js',enabled:true}],{items:[]},[{}]]){
+    const policy=createQqMemoryPolicy({request:async(url,init)=>url.includes('listPlugins')
+      ?ok({type:'server-response',rpcId:JSON.parse(init.body).rpcId,result:{ok:true,value}})
+      :{ok:false,status:405,json:async()=>({})}});
+    await assert.rejects(policy.sync('qq'),/未确认.*405/);
+  }
+  for(const mode of ['unreachable','wrong-envelope','unknown-session']){
+    const policy=createQqMemoryPolicy({request:async(url)=>{
+      if(url.includes('listPlugins')){if(mode==='unreachable')throw Error('offline');return ok({result:{ok:true,value:[]}});}
+      return {ok:false,status:405,json:async()=>mode==='unknown-session'?{error:'unknown session'}:{}};
+    }});
+    await assert.rejects(policy.sync('qq'),/未确认.*405/);
+  }
+});
+
 test('real bridge applies memory policy to new and reused QQ sessions but not closed-agent sessions', async () => {
   const h = await bridgeHarness();
   try {

@@ -1,0 +1,13 @@
+[Unit]
+Description=Private on-demand video speech socket
+
+[Socket]
+ListenStream=/run/qq-stack-speech.sock
+SocketUser=qqbot
+SocketGroup=qqbot
+SocketMode=0600
+Backlog=2
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

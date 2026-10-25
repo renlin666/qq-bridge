@@ -49,7 +49,8 @@ export function extractSharedLinks(text) {
 
 async function readJson(url, fetcher) {
   const result = await fetcher(url, 1500000);
-  if (result.statusCode !== 200 || result.truncated) throw new Error(`B站返回 HTTP ${result.statusCode} 或响应过大`);
+  if (result.statusCode !== 200 || result.truncated) throw Object.assign(
+    new Error(`B站返回 HTTP ${result.statusCode} 或响应过大`), { statusCode: result.statusCode });
   return JSON.parse(result.body);
 }
 
@@ -68,7 +69,23 @@ export async function readBilibili(reference, { page = 1, fetcher = safeFetch, m
   const bvid = ref.match(BV)?.[0];
   const aid = ref.match(AV)?.[1];
   if (!bvid && !aid) throw new Error('链接中没有有效的视频编号');
-  const view = await readJson(`https://api.bilibili.com/x/web-interface/view?${bvid ? `bvid=${bvid}` : `aid=${aid}`}`, fetcher);
+  let view, metadataError;
+  try {
+    view = await readJson(`https://api.bilibili.com/x/web-interface/view?${bvid ? `bvid=${bvid}` : `aid=${aid}`}`, fetcher);
+  } catch (error) {
+    if (error.statusCode !== 412 || !bvid) throw error;
+    // The public page-list endpoint can remain available when the detail
+    // endpoint rejects a cloud IP. It supplies real CIDs and ALL part durations;
+    // no title/description is invented and the full-duration gate still applies.
+    const pages = await readJson(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, fetcher);
+    if (pages.code !== 0 || !Array.isArray(pages.data) || !pages.data.length) throw error;
+    const complete = pages.data.every(p => Number.isSafeInteger(p.cid) && p.cid > 0
+      && Number.isFinite(p.duration) && p.duration > 0);
+    if (!complete) throw new Error('B站分P列表缺少有效媒体编号或完整时长，暂不能观看');
+    metadataError = error.message;
+    view = { code: 0, data: { bvid, pages: pages.data,
+      duration: pages.data.reduce((sum, part) => sum + part.duration, 0) } };
+  }
   if (view.code !== 0 || !view.data) throw new Error(`B站视频信息不可用（${Number(view.code)}）`);
   const v = view.data;
   const index = Math.max(1, Math.min(100, Math.trunc(Number(page) || 1)));
@@ -76,6 +93,7 @@ export async function readBilibili(reference, { page = 1, fetcher = safeFetch, m
   if (!part) throw new Error('视频没有这一分P');
   const result = {
     source: 'bilibili', url: `https://www.bilibili.com/video/${v.bvid}?p=${index}`,
+    ...(metadataError ? { metadataStatus: 'partial', metadataSource: 'pagelist', metadataError } : {}),
     bvid: v.bvid, cid: part.cid, title: String(v.title ?? '').slice(0, 500), author: String(v.owner?.name ?? ''),
     description: String(v.desc ?? '').slice(0, 1000), duration: part.duration ?? v.duration,
     totalDuration: v.duration ?? (Array.isArray(v.pages) && v.pages.every(p => Number(p.duration) > 0)

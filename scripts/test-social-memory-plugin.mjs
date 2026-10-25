@@ -27,7 +27,7 @@ test('临时反应独立于人、机器人和会话，逐渐衰减；重放不�
   assert.equal(reactions.get('bot', 'group:456', '123').label, '缓和');
 });
 
-test('高好感允许互损和短暂不悦，临时反应不加减分、不泄露到私聊，证据与撤权有效', async t => {
+test('高好感允许嘴硬和短暂不悦，互损另需偏好确认；临时反应不加减分、不泄露到私聊', async t => {
   const timestamp = Date.now();
   t.mock.method(Date, 'now', () => timestamp);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-reactions-'));
@@ -83,7 +83,8 @@ test('多人同聊分别提供相处方式，主说话人保留关键词；总�
   for (const message of messages) await integration.host.dispatchMessage(message, scope);
   const context = await integration.contextFor(scope.key);
   assert.match(context, /"userId":"123"/); assert.match(context, /"userId":"789"/);
-  assert.match(context, /公开的梗/); assert.match(context, /熟人互损/);
+  assert.match(context, /公开的梗/); assert.match(context, /"stage":"亲近"/);
+  assert.match(context, /尚未确认玩笑偏好/);
   assert.ok(context.length <= 1500);
 });
 
@@ -108,7 +109,7 @@ test('正式内置记忆插件：真实来源绑定、持久关键词索引、�
   const indexes = (await call('qq_social_memory_query', { query: '乌龙茶' })).indexes;
   assert.equal(indexes.length, 1);
   assert.equal(indexes[0].content, undefined);
-  assert.equal((await call('qq_social_memory_read', { memoryId: memory.memoryId })).content, '喜欢乌龙茶');
+  assert.equal((await call('qq_social_memory_read', { memoryId: memory.memoryId })).content, '我喜欢乌龙茶', '自动记忆保留本人逐字原话，手动记忆复用相同事实');
   const first = await call('qq_social_relationship_event', { kind: 'support', evidence: '喜欢乌龙茶' });
   assert.equal(first.applied, true);
   assert.equal(first.relationship.tier, '亲近');
@@ -144,9 +145,9 @@ test('真实唤醒链路注入关键词，等待上下文期间不会重复投�
   if (!server.listening) await new Promise(resolve => server.once('listening', resolve));
   try {
     h.setMode('reserved2'); h.setSelfIdentity('fixture', '10001');
-    h.appendSocialV2Message('group:456', 'fixture', '铁观音是什么茶', '铁观音是什么茶', false, false, 'source-1', [], '123', [], false, '10001');
+    h.appendSocialV2Message('group:456', 'fixture', '我喜欢铁观音', '我喜欢铁观音', false, false, 'source-1', [], '123', [], false, '10001');
     await integration.ready;
-    await integration.host.callTool('qq_social_memory_remember', { messageId: 'source-1', content: '喜欢铁观音', confirmed: true },
+    await integration.host.callTool('qq_social_memory_remember', { messageId: 'source-1', content: '我喜欢铁观音',kind:'preference', confirmed: true },
       { key: 'group:456', assertAuthorized() {} });
     assert.match(await integration.contextFor('group:456'), /memoryId/, '唤醒前本地索引必须可用');
     const first = h.sendWakePromptV2('group:456', 'admin');
@@ -157,7 +158,7 @@ test('真实唤醒链路注入关键词，等待上下文期间不会重复投�
     const delivered = h.calls.prompts[0].content.map(part => part.text ?? '').join('\n');
     assert.match(delivered, /<memory-data/);
     assert.match(delivered, /memoryId/);
-    assert.ok(!delivered.includes('喜欢铁观音'));
+    assert.ok(!delivered.match(/<memory-data[\s\S]*?<\/memory-data>/)?.[0].includes('喜欢铁观音'));
   } finally {
     release(); await new Promise(resolve => server.close(resolve)); await h.close();
   }

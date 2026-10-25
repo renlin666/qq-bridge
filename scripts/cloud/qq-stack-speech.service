@@ -1,0 +1,25 @@
+[Unit]
+Description=Isolated on-demand SenseVoice video transcription
+Requires=qq-stack-speech.socket
+
+[Service]
+Type=simple
+User=qqbot
+Group=qqbot
+ExecStart=/usr/local/bin/node /opt/qq-stack/qq-bridge/scripts/cloud/speech-socket-server.mjs
+Environment=NODE_OPTIONS=--max-old-space-size=64
+MemoryHigh=512M
+MemoryMax=640M
+MemorySwapMax=256M
+CPUQuota=100%
+TasksMax=32
+OOMPolicy=kill
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost

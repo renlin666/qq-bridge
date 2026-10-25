@@ -83,7 +83,9 @@ test('超长/未知时长/多P总时长超限在字幕和媒体请求前停止�
     assert.equal(result.watchStatus, 'skipped');
     assert.equal(result.frames.length, 0);
     assert.equal(result.transcript, undefined);
-    assert.equal(result.description, undefined);
+    assert.equal(result.description, '不可作为观看内容');
+    assert.equal(result.requiresUnwatchedDisclosure,true);
+    assert.equal(result.responseMode,'metadata-comment-only');
   }
   let calls = 0;
   const result = await readBilibili(bv, { maxVideoSeconds: 180, fetcher: async url => {

@@ -1,0 +1,26 @@
+[Unit]
+Description=QQ client friend requests with private administrator approval
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=qqbot
+ExecStart=/usr/bin/python3 /usr/local/lib/qq-stack/friend-ui/friend-ui.py --serve
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=qq-friend-ui
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/qq-friend-ui /var/lib/qq-stack/friend-ui
+PrivateTmp=true
+MemoryAccounting=true
+MemoryMax=220M
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target

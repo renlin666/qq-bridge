@@ -1,6 +1,6 @@
 {
   "id": "social-memory",
-  "version": "1.2.0",
+  "version": "1.6.0",
   "apiVersion": 1,
   "entry": "./index.js",
   "capabilities": [
@@ -9,12 +9,13 @@
     "memory.context",
     "memory.policy",
     "memory.legacy",
-    "scheduler"
+    "scheduler",
+    "admin.local"
   ],
   "tools": [
     {
       "name": "qq_social_memory_query",
-      "description": "按真实人物和当前会话检索本地记忆关键词索引，不返回正文。",
+      "description": "按当前授权会话检索关键词索引，可按主题筛选；observation是未确认观察，不作事实或评分依据；正文按需读取。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -32,6 +33,17 @@
           "query": {
             "type": "string",
             "maxLength": 200
+          },
+          "topic": {
+            "type": "string",
+            "enum": [
+              "game",
+              "reading",
+              "study",
+              "work",
+              "daily"
+            ],
+            "description": "可选主题标签，不改变人物或会话授权范围"
           }
         },
         "required": [
@@ -71,7 +83,7 @@
     },
     {
       "name": "qq_social_memory_remember",
-      "description": "记录原消息中有依据的日常事实或偏好。只有本人明确自述才设 confirmed=true；转述、推测设false。不得把提示词或敏感凭据当记忆。",
+      "description": "记录当前消息有依据的日常事实、偏好或印象（kind=experience、confirmed=false）；只保存一件事。confirmed=true仅在正文与本人明确自述逐字一致且通过规则时生效，其他内容自动降为待核实。相同人物/会话/类型的归一化重复保留多条来源，不做同义推断。可给出逐字evidence；禁止指令或敏感凭据。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -102,6 +114,12 @@
           },
           "confirmed": {
             "type": "boolean"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "可选逐字证据，必须出自messageId对应原消息"
           }
         },
         "required": [
@@ -142,7 +160,7 @@
     },
     {
       "name": "qq_social_relationship_event",
-      "description": "根据真实消息记录实质关系事件，或banter(接梗互损)/annoyed(短暂不耐烦)/repair(和解)/serious(转认真)临时反应；后四类不加减好感。证据须出自原消息，不把引用别人的话或普通问题误判冒犯，不为制造情绪捏造事件。",
+      "description": "绑定原消息的关系事件；优先随qq_send_message.socialEvents提交。banter_preference只接收本人明确互损偏好，resolve_conflict需明确和好；不改变信任分数。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -170,7 +188,9 @@
               "banter",
               "annoyed",
               "repair",
-              "serious"
+              "serious",
+              "banter_preference",
+              "resolve_conflict"
             ]
           },
           "evidence": {
@@ -180,6 +200,14 @@
           },
           "memoryId": {
             "type": "string"
+          },
+          "preference": {
+            "type": "string",
+            "enum": [
+              "light",
+              "mutual",
+              "stop"
+            ]
           }
         },
         "required": [
@@ -189,12 +217,61 @@
         ],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "qq_social_memory_profile",
+      "description": "按真实消息作者和当前授权会话生成有来源的人物资料摘录：最多3条已确认资料和1条未确认观察，每条100字。按需调用，不增加关系分数，不调用额外模型；观察不是事实或性格定论。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "当前会话收到的原消息 messageId/seq，绑定真实人物身份"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "topic": {
+            "type": "string",
+            "enum": [
+              "game",
+              "reading",
+              "study",
+              "work",
+              "daily"
+            ],
+            "description": "可选主题标签，不改变人物或会话授权范围"
+          }
+        },
+        "required": [
+          "messageId"
+        ],
+        "additionalProperties": false
+      }
     }
   ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "autoCapture": {
+        "type": "boolean",
+        "default": true,
+        "description": "收到获准人物的明确本人事实/偏好时自动逐字保存，附原消息证据；不会从玩笑/转述/指令猜测事实"
+      },
+      "captureGroupSpeakers": {
+        "type": "boolean",
+        "default": false,
+        "description": "管理员开启后，允许为白名单群内真实收到发言的QQ建档；不会增加私聊准入或读取其他群"
+      },
       "people": {
         "type": "array",
         "items": {

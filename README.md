@@ -1,8 +1,20 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-> **0.3.0-rc.3**：新增可调整的峰谷节流、旧记忆关键词入口和个人关系档位保底，见 [设置与验证说明](docs/guides/PEAK_ECONOMY_AND_MEMORY.md)。
+让 DeepSeek Harness 智能体参与 QQ 私聊和群聊。项目通过 SnowLuma / OneBot 接收消息，由 DSH 执行推理，再通过带权限校验和回执的工具回复；同时提供本地人物记忆、关系策略、媒体读取和可扩展的项目插件宿主。
 
-> **本分支：0.3.0-rc.3 · 项目自身的功能插件 API v1**。已接入本地人物记忆与独立关系系统、视频实际 @ / 5 分钟门槛和提示词精简。早期接入及备份方法见 [接入说明](docs/guides/SOCIAL_MEMORY_RELEASE.md)。安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)，版本变更见 [CHANGELOG](CHANGELOG.md)，来源和上游关系见 [UPSTREAM](UPSTREAM.md)。下文保留原项目的安装与协议说明，其中原版本号指上游基线。
+**当前版本：0.3.0-rc.8 · 记忆扩展 1.6.0 · 项目插件 API v1。** 这是基于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) 的定制分支，保留原项目 MIT 许可与来源说明。下文旧版本号描述上游协议基线，不代表本分支已合并所有上游更新。
+
+| 功能 | 说明 |
+|---|---|
+| 长期记忆 | 真实 QQ 身份、机器人和群/私聊范围绑定；关键词先召回、主题筛选、来源记录、观察候选与管理员核实，按需读取正文。 |
+| 人物关系 | 五阶段关系、独立玩笑偏好与冲突状态；互动绑定真实消息和发送回执，明确叫停优先。 |
+| 项目插件 | 在本项目 `extensions/` 中扩展工具、消息事件、定时任务与存储，复用权限、超时、回执和幂等机制。 |
+| 媒体与空间 | 搜图与图片发送、B站视频读取、QQ 空间工具；默认视频整段门槛 180 秒，超长需真实消息许可，画面采样和转写范围明确标注。 |
+| 云端运行 | 支持低内存 Linux 部署、流式媒体下载、资源门槛及可选独立语音服务；本地开发可用 development-only 标记禁止生产启动。 |
+
+安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)。记忆功能见 [记忆 1.6 使用说明](docs/guides/MEMORY_V16.md)与[管理员记忆库](docs/guides/MEMORY_LIBRARY.md)，媒体规则见 [视频参与说明](docs/guides/VIDEO_PARTICIPATION.md)，部署见 [低内存 Linux 指南](docs/guides/LINUX_LOW_MEMORY.md)。完整变更见 [CHANGELOG](CHANGELOG.md)，上游关系见 [UPSTREAM](UPSTREAM.md)。
+
+运行需要 Node.js ≥22.13 和兼容的 DSH / OneBot 环境。QQ 客户端接入组件及模型服务由使用者另行配置；本仓库不包含个人角色、账号、API 凭据、聊天记录或生产数据库。测试通过不代表已完成所有设备、长时间负载或自然聊天质量验收。
 >
 > 本机自定义角色、配置和运行数据不发布。需要示例人格卡时，可将 `examples/roles/小鲸鱼.md` 复制到 `roles/小鲸鱼.md` 后自行编辑。
 

@@ -10,6 +10,11 @@ import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
 import { StringDecoder } from 'node:string_decoder';
+import { createWriteStream } from 'node:fs';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const dnsLookup = dns.promises.lookup;
 
@@ -193,18 +198,22 @@ function validateLimit(value, name) {
  * 返回 `{ok:true,result}` 或 `{ok:false,error,retryable}`；retryable 只标记网络层失败
  * （连接失败/超时/正文中断），大小与图片签名等策略性拒绝不重试。
  */
-function attemptOnce(url, address, limit, binary, budgetMs, requestHeaders = {}) {
+function attemptOnce(url, address, limit, binary, budgetMs, requestHeaders = {}, outputFile) {
   return new Promise((resolve) => {
     let settled = false;
     let req;
     let response;
+    let writing;
+    let policyError;
     const settle = (outcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(outcome);
+      // A retry may reuse the file: wait for the previous writer to close first.
+      if (writing) writing.catch(() => {}).then(() => resolve(outcome));
+      else resolve(outcome);
     };
-    const fail = (error, retryable) => settle({ ok: false, error, retryable: retryable === true });
+    const fail = (error, retryable) => settle({ ok: false, error: policyError ?? error, retryable: retryable === true && !(policyError ?? error).policy });
     const done = (result) => settle({ ok: true, result });
     const timer = setTimeout(() => {
       const error = new Error(`请求超时：${url.hostname}`);
@@ -243,6 +252,18 @@ function attemptOnce(url, address, limit, binary, budgetMs, requestHeaders = {})
           done({ statusCode, redirect: String(res.headers.location || '') });
           // 不下载重定向正文：攻击者可以发送无限正文消耗连接和带宽。
           res.destroy();
+          return;
+        }
+        if (binary && outputFile) {
+          if (statusCode !== 200) { done({ statusCode }); res.destroy(); return; }
+          let bytes = 0;
+          const bounded = new Transform({ transform(chunk, _encoding, callback) {
+            bytes += chunk.length;
+            if (bytes > limit) policyError = Object.assign(new Error(`响应体超过大小限制（${limit} 字节）`), { policy: true });
+            callback(policyError ?? null, chunk);
+          } });
+          writing = pipeline(res, bounded, createWriteStream(outputFile, { mode: 0o600 }));
+          writing.then(() => done({ statusCode, bytes }), error => fail(error, !error.policy));
           return;
         }
         const chunks = [];
@@ -314,7 +335,7 @@ async function requestOnce(url, addresses, limit, binary = false, options = {}) 
     const budget = list.length === 1
       ? timeoutMs
       : Math.min(options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS, remaining);
-    const outcome = await attemptOnce(url, list[i], limit, binary, budget, options.headers);
+    const outcome = await attemptOnce(url, list[i], limit, binary, budget, options.headers, options.outputFile);
     if (outcome.ok) return outcome.result;
     lastError = outcome.error;
     if (!outcome.retryable) throw outcome.error;
@@ -407,4 +428,35 @@ export async function safeFetchMedia(urlString, maxBytes, referer) {
     return b;
   }
   throw new Error('媒体重定向次数过多');
+}
+
+// Stream to a private temporary file using the same DNS pinning, redirect and
+// byte limits as the buffered path. Never give FFmpeg an unvalidated remote URL.
+export async function safeFetchMediaToFile(urlString, maxBytes, referer, destination) {
+  validateLimit(maxBytes, 'maxBytes');
+  const temporary = `${destination}.${randomUUID()}.part`;
+  try {
+    let { url, addresses } = await validateFetchUrl(urlString);
+    for (let i = 0; i <= 5; i++) {
+      const result = await requestOnce(url, addresses, maxBytes, true, {
+        timeoutMs: 90000, attemptTimeoutMs: 30000, outputFile: temporary,
+        headers: { referer, accept: '*/*' }
+      });
+      if (REDIRECT_STATUSES.has(result.statusCode)) {
+        if (!result.redirect) throw new Error('媒体重定向缺少 Location');
+        ({ url, addresses } = await validateFetchUrl(new URL(result.redirect, url).href));
+        continue;
+      }
+      if (result.statusCode !== 200) throw new Error(`媒体读取失败：HTTP ${result.statusCode}`);
+      const handle = await fs.open(temporary, 'r');
+      try {
+        const header = Buffer.alloc(12);
+        const { bytesRead } = await handle.read(header, 0, 12, 0);
+        if (bytesRead < 12 || !['ftyp', 'styp'].includes(header.toString('ascii', 4, 8))) throw new Error('不是有效的 MP4/DASH 媒体');
+      } finally { await handle.close(); }
+      await fs.rename(temporary, destination);
+      return { bytes: result.bytes };
+    }
+    throw new Error('媒体重定向次数过多');
+  } finally { await fs.rm(temporary, { force: true }); }
 }

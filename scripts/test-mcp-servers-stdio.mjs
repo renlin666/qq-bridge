@@ -1,6 +1,7 @@
 // 模拟 DSH 的 dsh-mcp-client：以 stdio 拉起桥接的 MCP server，握手并列出工具，
 // 验证三个 MCP server 在新版 DSH 环境下仍能被正常接入（不需要 SnowLuma 在线）。
 import path from 'node:path';
+import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -27,6 +28,11 @@ for (const { serverName, script } of SERVERS) {
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();
+    if (serverName === 'snowluma') {
+      const send = tools.find(tool => tool.name === 'qq_send_message');
+      assert.ok(send.inputSchema.required.includes('socialEvents'), 'normal replies explicitly decide social events');
+      assert.equal(send.inputSchema.properties.socialEvents.maxItems, 3);
+    }
     const names = tools.map((t) => t.name).sort();
     console.log(`✅ ${serverName}: ${names.length} tools`);
     console.log(`   ${names.join(', ')}`);

@@ -21,6 +21,7 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
     if (!BUILTIN_IDS.includes(row.id) && row.manifest.capabilities.some(name => !getConfig().extensions?.[row.id]?.capabilities?.includes(name))) fail('插件能力授权已撤销', 403);
   }
   async function cleanup(row) {
+    row.admin.clear();
     for (const controller of row.calls) controller.abort();
     for (const fn of row.cleanup.splice(0).reverse()) {
       try { await fn(); } catch (error) { log('插件资源清理失败', row.id, error.message); }
@@ -84,7 +85,7 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
     });
   }
   async function activate(descriptor) {
-    const row = { ...descriptor, cleanup: [], calls: new Set(), events: new Map(), commands: new Map(), registered: [] };
+    const row = { ...descriptor, cleanup: [], calls: new Set(), events: new Map(), commands: new Map(), admin: new Map(), registered: [] };
     rows.set(row.id, row);
     if (row.status !== 'discovered') return;
     row.status = 'loading';
@@ -100,6 +101,11 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
         row.contextProvider = handler;
       } }),
       log: (...args) => log('[extension:' + row.id + ']', ...args),
+      admin: Object.freeze({ register(name,handler) {
+        registering();
+        if(!BUILTIN_IDS.includes(row.id)||!row.manifest.capabilities.includes('admin.local')||!TOOL_RE.test(name)||typeof handler!=='function'||row.admin.has(name))fail('管理员处理器未授权或重复');
+        row.admin.set(name,handler);
+      } }),
       tools: Object.freeze({ register(name, execute, { toMcp } = {}) {
         registering();
         const definition = row.manifest.tools.find(tool => tool.name === name);
@@ -217,6 +223,15 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
       if (!item) return null;
       const { key: _key, ...parameters } = args;
       return invoke(item, parameters, scope, false);
+    },
+    async invokeAdmin(id,name,args,authorize) {
+      await ready;const row=rows.get(id),handler=row?.admin.get(name);
+      if(!handler||typeof authorize!=='function')fail('管理员功能不可用',403);
+      live(row);authorize();
+      return deadline(row,10000,async signal=>{
+        const assertAuthorized=key=>{if(signal.aborted)fail('管理员操作已取消',403);live(row);authorize(key);};
+        assertAuthorized();return handler(copy(args??{}),{assertAuthorized,signal});
+      });
     },
     async dispatchMessage(message, scope) {
       await ready;

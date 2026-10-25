@@ -166,7 +166,8 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
     if (action === 'qzone-list') {
       if (owner !== bot && !state.posts.some(p => p.accountId === bot && ownerOf(p) === owner && p.readKeys?.includes(key))) {
         const friends = await onebot('get_friend_list', {});
-        if (!Array.isArray(friends) || !friends.some(f => String(f.user_id) === owner)) fail('只能查看好友动态中已出现的作者或真实 QQ 好友', 403);
+        if (!Array.isArray(friends)) fail('好友列表响应无效，无法判断是否为好友；不能推断对方空间权限，请稍后再查', 502);
+        if (!friends.some(f => String(f.user_id) === owner)) fail(`QZONE_NOT_FRIEND: ${owner} 不在真实 QQ 好友列表，也不是本会话已读取的动态作者。桥接规则在访问空间前拦截，未验证对方空间权限；不要说对方设了权限或网页打不开。若是当前发言人邀请看空间，可调用 qq_request_friend_approval，先私聊配置的管理员 申请批准；未批准不得添加。可以向对方说明审批限制。`, 403);
       }
       return { posts: await posts(bot, owner, key, position(body.pos)) };
     }

@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
 import { registerIntegrationTools } from './mcp-qq-integrations.js';
+import { socialEventsSchema } from './social-event-metadata.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -703,13 +704,14 @@ server.tool(
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
     messages: z.union([z.string(), z.array(z.string()).min(1)]).describe('要发送的内容：字符串=一条；数组=分多条'),
+    socialEvents: socialEventsSchema,
     replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
     atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的群成员 QQ 号（群聊中用于点名某个人；与引用二选一即可，不要滥用）'),
     gapMode: z.enum(['auto', 'fixed', 'byLength']).optional().describe('auto=桥接随机；fixed=固定间隔；byLength=按字数计算'),
     gapMs: z.number().optional().describe('fixed 模式下的统一间隔（毫秒）'),
     gaps: z.array(z.number()).optional().describe('fixed 模式下逐条间隔（长度=条数-1）')
   },
-  async ({ key, token, messages, replyToMessageId, atUserId, gapMode, gapMs, gaps }) => {
+  async ({ key, token, messages, socialEvents, replyToMessageId, atUserId, gapMode, gapMs, gaps }) => {
     try {
       let finalMessages = messages;
       if (typeof finalMessages === 'string') {
@@ -731,7 +733,7 @@ server.tool(
       }
       const data = await agentApi('/api/socialV2/send-message', {
         method: 'POST',
-        body: JSON.stringify({ key, messages: finalMessages, replyToMessageId, atUserId: atUserId ?? null, gapMode, gapMs, gaps }),
+        body: JSON.stringify({ key, messages: finalMessages, socialEvents, replyToMessageId, atUserId: atUserId ?? null, gapMode, gapMs, gaps }),
         headers: { 'x-agent-token': token },
         timeoutMs: 300000
       });
@@ -874,12 +876,12 @@ server.tool(
 
 server.tool(
   'qq_memory_append',
-  '记录一条轻量记忆：activeTopic=进行中的话题；pendingThought=你想说但还没说的话；memberImpression=对某位群友的印象。记忆会持久化，并在后续唤醒/qq_get_prompt 中自动出现。',
+  '记录一条轻量记忆：activeTopic=进行中的话题；pendingThought=你想说但还没说的话；memberImpression=只在拿不到真实 QQ 号时用的临时印象。人物档案与长期印象（口癖、雷点、相处方式、明确偏好）请用 qq_social_memory_remember(kind="experience", confirmed=false, messageId=该人真实消息) 写入记忆库，不要用 memberImpression 代替。记忆会持久化，并在后续唤醒/qq_get_prompt 中自动出现。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).describe('记忆类别'),
-    content: z.string().describe('记忆内容，例如话题、想说的话、对某人的印象标签'),
+    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).describe('记忆类别；人物档案与长期印象请改用 qq_social_memory_remember'),
+    content: z.string().describe('记忆内容，例如话题、想说的话；印象请写具体小事与证据'),
     extra: z.object({
       target: z.string().optional().describe('memberImpression 时的群友名字/昵称'),
       userId: z.string().optional().describe('memberImpression 对应的真实 QQ 号；来自当前消息，按此号跨授权会话共享'),
@@ -896,7 +898,7 @@ server.tool(
         body: JSON.stringify({ key, category, content, extra: extra || {} }),
         headers: { 'x-agent-token': token }
       });
-      return { content: [{ type: 'text', text: serializeModelData(data) }] };
+      return { content: [{ type: 'text', text: serializeModelData(data) + (category === 'memberImpression' ? '\n\n提示：memberImpression 只是本会话的临时印象，不会进人物档案。若这是对这位有真实 QQ 号的群友的长期印象，请改用 qq_social_memory_remember(kind="experience", confirmed=false, messageId=该人真实消息) 写入记忆库，才能按人物检索复习。' : '') }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `记忆写入失败：${error?.message ?? error}` }], isError: true };
     }
