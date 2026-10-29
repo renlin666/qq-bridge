@@ -254,6 +254,7 @@ await test('combined close respects the separate mark-read and wake-config tool 
 await test('an in-flight wait cannot authorize new messages after its session token is retired', async ({ h, st, request, append }) => {
   await h.ensureSession(KEY);
   append('before wait');
+  await request('unread'); // Drain already-readable history so wait is actually in flight at revocation.
   const oldToken = st.agentToken;
   const waiting = request('wait', { body: { timeoutMs: 1000, quietMs: 0 }, token: oldToken });
   const timer = setTimeout(() => { h.retireSession(KEY); append('arrived after token retirement'); }, 60);
@@ -267,6 +268,7 @@ await test('an in-flight wait cannot authorize new messages after its session to
 
 await test('an in-flight wait cannot write observation into a replaced conversation state', async ({ h, st, request, append }) => {
   append('old state');
+  await request('unread');
   const waiting = request('wait', { body: { timeoutMs: 100, quietMs: 0 } });
   const timer = setTimeout(() => {
     h.socialV2.conversations.delete(KEY);
@@ -283,6 +285,7 @@ await test('an in-flight wait cannot write observation into a replaced conversat
 
 await test('an in-flight wait rechecks mode permission before exposing a new arrival', async ({ h, request, append }) => {
   append('before mode change');
+  await request('unread');
   const waiting = request('wait', { body: { timeoutMs: 1000, quietMs: 0 } });
   const timer = setTimeout(() => { h.setMode('chat'); append('after mode change'); }, 60);
   let result;
@@ -308,6 +311,7 @@ await test('building a budgeted snapshot preserves whole oldest messages without
 
 await test('an in-flight wait rechecks paused, feature, tool and allowlist permissions without granting observation', async ({ h, st, request, append }) => {
   append('unread before policy changes');
+  await request('unread');
   const cases = [
     ['pause', () => { h.socialV2.paused = true; }, () => { h.socialV2.paused = false; }],
     ['feature disable', () => { h.cfg.socialV2.enabled = false; }, () => { h.cfg.socialV2.enabled = true; }],

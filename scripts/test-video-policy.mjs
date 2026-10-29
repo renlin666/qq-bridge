@@ -3,13 +3,25 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { directlyMentionsBot, videoPolicy, videoApproval } from '../src/video-watch-policy.js';
+import { directlyMentionsBot, videoPolicy, videoApproval, videoDurationReason } from '../src/video-watch-policy.js';
 import { readBilibiliMedia } from '../src/bilibili-media.js';
 import { readBilibili } from '../src/bilibili.js';
 import { createIntegrations } from '../src/project-integrations.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { compactModelMessage, compactModelData, videoMessageView } from '../src/qq-model-view.js';
 const bv = 'BV1xx411c7mD';
+
+test('管理员可暂停时长许可门槛，未知时长仍拒绝，唤醒提示同步', async () => {
+  const policy = videoPolicy({ durationGateEnabled: false });
+  assert.equal(videoDurationReason({ duration: 600, totalDuration: 1200 }, policy), null);
+  assert.equal(videoDurationReason({}, policy), 'duration_unknown');
+  const h = await bridgeHarness({ config: { extensions: { bilibili: { enabled: true, config: { durationGateEnabled: false } } } } });
+  try {
+    const prompt = h.buildWakePromptV2('group:456', 'video', 'video');
+    assert.match(prompt, /已暂时关闭视频时长许可门槛/);
+    assert.doesNotMatch(prompt, /当前整段时长门槛180秒/);
+  } finally { await h.close(); }
+});
 
 test('未@仍显示视频标题链接，但只标为分享元数据，不能当作观看证据', () => {
   const card = '[B站视频卡片（分享者提供的信息）] 分享标题\nhttps://www.bilibili.com/video/' + bv;
@@ -27,12 +39,13 @@ test('未@视频恢复普通唤醒，旧消息快照显示标题；许可回复�
   const h = await bridgeHarness();
   try {
     h.setMode('reserved2'); h.setSelfIdentity('fixture', '10001'); h.setReady(true);
+    const initial = h.getSocialV2State('group:456'); initial.bootstrapSent = true; initial.wakeConfig = { triggers: { probability: 0 }, batchWindowMs: 8000 };
     const card = JSON.stringify({ meta: { detail_1: { title: '可按标题接话', qqdocurl: 'https://www.bilibili.com/video/' + bv } } });
     await h.handleIncoming('group', 456, { self_id: 10001, user_id: 123, group_id: 456, message_id: 'share',
       sender: { nickname: 'fixture' }, message: [{ type: 'json', data: { data: card } }] }, h.cfg);
     const st = h.getSocialV2State('group:456');
     assert.equal(st.bootstrapSent, true);
-    assert.ok(st.pendingWakeTimer);
+    assert.equal(!!st.pendingWakeTimer, false);
     const snapshot = h.buildWakeSnapshotV2('group:456');
     assert.match(JSON.stringify(snapshot), /可按标题接话/);
     assert.equal(snapshot.messages[0].videoWatch.status, 'not-read');
@@ -62,7 +75,7 @@ test('许可绑定真实发信人、原视频与当前会话消息，引用他�
 });
 
 test('真实@与引用、昵称、@全体分开；门槛默认180秒8帧', () => {
-  assert.deepEqual(videoPolicy(), { maxVideoSeconds: 180, defaultFrameCount: 8, maxTextChars: 6000 });
+  assert.deepEqual(videoPolicy(), { durationGateEnabled: true, maxVideoSeconds: 180, defaultFrameCount: 8, maxTextChars: 6000 });
   for (const message of [[{ type: 'text', data: { text: '@10001' } }], [{ type: 'reply', data: { id: '1' } }], [{ type: 'at', data: { qq: 'all' } }], [{ type: 'at', data: { qq: '10002' } }]]) {
     assert.equal(directlyMentionsBot({ self_id: 10001, message }), false);
   }
@@ -70,7 +83,7 @@ test('真实@与引用、昵称、@全体分开；门槛默认180秒8帧', () =>
 });
 
 test('超长/未知时长/多P总时长超限在字幕和媒体请求前停止，片段参数不能绕过', async () => {
-  for (const [duration, total] of [[181, 181], [undefined, undefined], [null, null], [10, 600]]) {
+  for (const [duration, total] of [[180, 180], [181, 181], [undefined, undefined], [null, null], [10, 600]]) {
     let requests = 0;
     const fetcher = async url => {
       requests++;
@@ -83,24 +96,24 @@ test('超长/未知时长/多P总时长超限在字幕和媒体请求前停止�
     assert.equal(result.watchStatus, 'skipped');
     assert.equal(result.frames.length, 0);
     assert.equal(result.transcript, undefined);
-    assert.equal(result.description, '不可作为观看内容');
-    assert.equal(result.requiresUnwatchedDisclosure,true);
-    assert.equal(result.responseMode,'metadata-comment-only');
+    assert.equal(result.description, '');
+    assert.equal(result.requiresUnwatchedDisclosure,false);
+    assert.equal(result.responseMode,'no-watch-no-comment');
   }
   let calls = 0;
   const result = await readBilibili(bv, { maxVideoSeconds: 180, fetcher: async url => {
     calls++;
     return { statusCode: 200, url, body: JSON.stringify(url.includes('/view?') ? { code: 0, data: { bvid: bv, duration: 180, pages: [{ cid: 1, duration: 180 }] } } : { data: {} }) };
   } });
-  assert.equal(result.watchBlockReason, undefined);
-  assert.equal(calls, 2, '恰好180秒允许继续检查字幕');
+  assert.equal(result.watchBlockReason, 'duration_exceeded');
+  assert.equal(calls, 1, '恰好180秒不能读取字幕');
 });
 
-test('≤180秒无需@；超长需真实许可；撤销账号后不能借缓存或参数绕过', async t => {
+test('小于180秒可读；达到180秒即拒绝，真实许可不能绕过', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-video-policy-'));
   const cfg = { integrations: { bilibili: { approvalUserId: '10009' } } };
   const message = { messageId: '1', seq: 42, directAtSelf: false, sharedLinks: ['https://www.bilibili.com/video/' + bv] };
-  const messages = [message]; let reads = 0, duration = 180, approvedOptions;
+  const messages = [message]; let reads = 0, duration = 179, approvedOptions;
   let clock = Date.now(); t.mock.method(Date, 'now', () => clock);
   const integration = createIntegrations({ stateDir: dir, getConfig: () => cfg,
     getConversation: () => ({ recentMessages: messages }), sessionAllowed: () => true, tokenOk: () => true,
@@ -108,21 +121,25 @@ test('≤180秒无需@；超长需真实许可；撤销账号后不能借缓存�
   t.after(async () => { await integration.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const scope = { key: 'group:456', assertAuthorized() {} };
   const read = async (extra = {}) => { clock += 6000; return JSON.parse((await integration.host.callTool('qq_read_bilibili', { messageId: '1', ...extra }, scope)).content[0].text).video; };
-  assert.equal((await read()).duration, 180);
+  assert.equal((await read()).duration, 179);
   assert.equal(approvedOptions, false);
-  duration = 181;
+  duration = 180;
   assert.equal((await read()).reason, 'duration_exceeded');
   messages.push({ seq: 43, userId: '10008', plain: '允许观看视频 42' });
   assert.equal((await read()).reason, 'duration_exceeded');
   messages.push({ seq: 44, userId: '10009', plain: '允许观看视频 42' });
-  assert.equal((await read()).watchAuthorization, 'explicit-approval');
-  assert.equal(approvedOptions, true);
+  assert.equal((await read()).reason, 'duration_exceeded');
+  assert.equal(approvedOptions, false);
   cfg.integrations.bilibili.approvalUserId = '10007';
   assert.equal((await read()).reason, 'duration_exceeded');
   assert.equal(approvedOptions, false);
   const forged = await integration.host.callTool('qq_read_bilibili', { messageId: '1', watchApproved: true }, scope).catch(error => error);
   assert.ok(forged.isError || forged instanceof Error, '模型不能传内部批准标志');
   assert.equal(reads, 5);
+  cfg.integrations.bilibili.durationGateEnabled = false;
+  assert.equal((await read()).watchAuthorization, 'duration-gate-disabled');
+  cfg.integrations.bilibili.durationGateEnabled = true;
+  assert.equal((await read()).reason, 'duration_exceeded', '重新启用立即生效，不借缓存绕过');
 });
 
 test('真实进线保存独立的直接@证据，普通分享不被标成已@', async () => {

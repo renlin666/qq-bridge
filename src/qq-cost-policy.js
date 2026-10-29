@@ -12,6 +12,29 @@ export function isQqCostLimit(reason) {
     || /^QQ (?:单轮|单条回复)估算预算保护：/.test(String(error?.message ?? ''));
 }
 
+// Provider quota exhaustion can arrive as a structured error or as JSON inside
+// an HTTP error message. A generic 429 can instead mean a transient rate limit.
+export function isAccountQuotaExceeded(reason) {
+  const queue = [reason];
+  const seen = new Set();
+  while (queue.length) {
+    const value = queue.shift();
+    if (value == null) continue;
+    if (typeof value === 'string') {
+      if (/\b(?:AccountQuotaExceeded|insufficient_quota|quota_exceeded|billing_hard_limit_reached)\b/i.test(value)
+          || /(?:exceed(?:ed|s)?|exhaust(?:ed)?)\s+(?:the\s+|your\s+)?(?:\d+[- ]hour\s+|current\s+|usage\s+)?(?:usage\s+)?quota\b/i.test(value)
+          || /(?:账户|账号|使用|调用|模型)额度(?:已|已经)?(?:耗尽|用完|超出)/.test(value)) return true;
+      continue;
+    }
+    if (typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    for (const key of ['code', 'type', 'message', 'error', 'failure', 'cause']) {
+      if (value[key] != null) queue.push(value[key]);
+    }
+  }
+  return false;
+}
+
 function grantFile(root, sid, content) {
   const text = (content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n');
   const hash = createHash('sha256').update(`${sid}\0${text}`).digest('hex');

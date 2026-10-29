@@ -168,6 +168,34 @@ test('nested reply uses observed comment identity; duplicate requests never issu
   await assert.rejects(f.qzone.handle('qzone-react', 'group:456', { ...body, tid: 'foreign' }), /自己空间/);
 });
 
+test('replying to a nested foreign author anchors to the root author, mentioning the actual target', async t => {
+  let params;
+  const f = qzoneFixture(t, { fetcher: async (_url, init) => {
+    params = new URLSearchParams(init.body);
+    return { ok: true, text: async () => '{"code":0,"commentid":"new"}' };
+  } });
+  f.comments[0].replies.push({ comment_id: 'r2', uin: 23456, content: 'nested', time: 103 });
+  await f.qzone.handle('qzone-react', 'group:456', { tid: 'own-tid', commentId: 'r2',
+    commentUserId: '23456', parentCommentId: 'c1', content: '回复楼中楼', requestId: 'nested_001' });
+  assert.equal(params.get('commentId'), 'c1');
+  assert.equal(params.get('commentUin'), '12345');
+  assert.equal(params.get('replyUin'), '23456');
+  assert.match(params.get('content'), /uin:23456/);
+});
+
+test('explicit server rejection may retry the same request; malformed/unknown results remain reserved', async t => {
+  let reject = true, writes = 0;
+  const f = qzoneFixture(t, { fetcher: async () => {
+    writes++;
+    return { ok: true, text: async () => reject ? '{"code":-10005}' : '{"code":0,"commentid":"new"}' };
+  } });
+  const body = { tid: 'own-tid', commentId: 'c1', content: '回复', requestId: 'rejected_01' };
+  await assert.rejects(f.qzone.handle('qzone-react', 'group:456', body), /code=-10005/);
+  reject = false;
+  assert.equal((await f.qzone.handle('qzone-react', 'group:456', body)).confirmed, true);
+  assert.equal(writes, 2);
+});
+
 test('uncertain comments reserve request IDs across restarts', async t => {
   const f = qzoneFixture(t, { fetcher: async () => { throw new Error('timeout'); } });
   const body = { tid: 'own-tid', commentId: 'c1', content: '回复', requestId: 'reply_002' };

@@ -3,14 +3,38 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { test } from 'node:test';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { createIntegrations } from '../src/project-integrations.js';
 
-async function fixture(run, cfg = {}) {
+test('urgent arrivals shorten a pending normal batch without opening a second model turn', async () => {
+  const timers = [];
+  const h = await bridgeHarness({ globals: {
+    setTimeout: (fn, ms) => { const timer = { fn, ms, cancelled: false, unref() {} }; timers.push(timer); return timer; },
+    clearTimeout: timer => { if (timer) timer.cancelled = true; }
+  } });
+  try {
+    h.setMode('reserved2');
+    const st = h.getSocialV2State('group:456');
+    h.scheduleWakeV2('group:456', 'anyMessage');
+    const ordinary = st.pendingWakeTimer;
+    assert.equal(ordinary.ms, 3000);
+    h.scheduleWakeV2('group:456', 'atMention');
+    assert.equal(ordinary.cancelled, true);
+    assert.equal(st.pendingWakeTimer.ms, 1000);
+    assert.equal(st.pendingWakeReason, 'atMention');
+    const urgent = st.pendingWakeTimer;
+    h.scheduleWakeV2('group:456', 'anyMessage');
+    assert.equal(st.pendingWakeTimer, urgent);
+    assert.equal(h.calls.prompts.length, 0);
+  } finally { await h.close(); }
+});
+
+async function fixture(run, cfg = {}, globals = {}) {
   const h = await bridgeHarness({ config: { socialV2: {
     wake: { preSleepWaitEnabled: true, preSleepWaitMs: 300000 },
     wait: { minMs: 100, maxMs: 600000, minQuietAfterNewMs: 100 },
     proactive: { enabled: false }, sticker: { enabled: false },
     ...cfg,
-  } } });
+  } }, globals });
   h.setMode('reserved2');
   const key = 'group:456';
   const st = h.getSocialV2State(key);
@@ -27,7 +51,7 @@ async function fixture(run, cfg = {}) {
       res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(raw) }));
     });
     req.on('error', reject);
-    req.setTimeout(5000, () => req.destroy(new Error('Fixture request timed out')));
+    req.setTimeout(30000, () => req.destroy(new Error('Fixture request timed out')));
     req.end(body === undefined ? undefined : JSON.stringify({ key, ...body }));
   });
   // GET routes carry their options in the query string, not the body.
@@ -49,6 +73,29 @@ async function fixture(run, cfg = {}) {
   try { await run({ h, key, st, request, get, append }); }
   finally { await new Promise(resolve => server.close(resolve)); await h.close(); }
 }
+
+test('verified CS commentary caps long waits, returns proactive refresh guidance, and leaves normal/reply waits alone',async()=>{
+  let active=true;
+  await fixture(async({h,key,request,append,st})=>{
+    append('CS比赛解说');
+    await h.sendWakePromptV2(key,'question');
+    const result=await request('wait',{timeoutMs:240000,minNewMessages:3,quietMs:60000});
+    assert(result.data.waitedMs>=20000 && result.data.waitedMs<21500);
+    assert.equal(result.data.quietMs,3000);
+    assert.equal(result.data.csCommentary.refreshAfterMs,20000);
+    assert.equal(result.data.preSleepWaitSatisfied,false);
+    assert.equal('preSleepWaitRemainingMs' in result.data,false);
+    st.lastIncomingAt=Date.now()-20000;
+    const reply=await request('wait',{purpose:'reply',timeoutMs:100,quietMs:8000});
+    assert.equal(reply.data.quietMs,8000);assert.equal('csCommentary' in reply.data,false);
+    active=false;
+    const normal=await request('wait',{timeoutMs:100,quietMs:60000});
+    assert.equal(normal.data.quietMs,60000);assert.equal('csCommentary' in normal.data,false);
+    assert.equal(normal.data.preSleepWaitMs,300000);
+  },{wait:{minMs:100,maxMs:600000,minQuietAfterNewMs:100,maxQuietMs:120000}},{
+    createIntegrations:options=>{const handle=createIntegrations(options);handle.csCommentaryFor=()=>active;return handle;}
+  });
+});
 
 test('first reply does not wait out timeout when the snapshot message is already quiet', () => fixture(async ({ h, key, st, request, append }) => {
   append('a complete first message');
@@ -86,6 +133,34 @@ test('a message between snapshot and wait is returned without duplicate snapshot
   assert.deepEqual(result.data.newMessages.map(m => m.seq), [2]);
   assert.equal(result.data.readThroughSeq, 2);
   assert.equal(st.unread.length, 2, 'visibility never acknowledges messages');
+}));
+
+for (const purpose of [undefined, 'messages']) test(`unseen arrivals before ${purpose ?? 'default'} wait return promptly`, () => fixture(async ({ h, key, st, request, append }) => {
+  append('snapshot');
+  await h.sendWakePromptV2(key, 'question');
+  append('received during model thinking');
+  st.lastIncomingAt = Date.now() - 1000;
+  const result = await request('wait', { purpose, timeoutMs: 1500, quietMs: 100 });
+  assert.equal(result.data.arrived, true);
+  assert.ok(result.data.waitedMs < 500);
+  assert.deepEqual(result.data.newMessages.map(m => m.seq), [2]);
+  assert.equal(result.data.readThroughSeq, 2);
+  assert.equal(st.unread.length, 2);
+}));
+
+test('message wait has a hard budget during continuous incoming messages', () => fixture(async ({ request, append }) => {
+  append('seen');
+  await request('unread');
+  const timer = setInterval(() => append('supplement'), 70);
+  try {
+    const result = await request('wait', { timeoutMs: 400, quietMs: 1200 });
+    assert.equal(result.data.arrived, true);
+    assert.equal(result.data.quiet, false);
+    assert.equal(result.data.timeout, true);
+    assert.ok(result.data.waitedMs < 750);
+    assert.equal(result.data.preSleepWaitSatisfied, false);
+    assert.ok(result.data.newMessages.length > 0);
+  } finally { clearInterval(timer); }
 }));
 
 test('each supplement restarts quiet from its actual arrival, and appears exactly once', () => fixture(async ({ st, request, append }) => {

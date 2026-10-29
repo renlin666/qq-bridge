@@ -6,6 +6,19 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 const ok = body => ({ ok: true, status: 200, json: async () => body });
 
+test('final prompt assembly excludes unavailable own-layer local tools without stopping later middleware', async () => {
+  let assemble;
+  apply({ tools: { restrict() {}, guard() {} }, systemPrompt: { section() {} },
+    on(event, handler) { if (event === 'system-prompt/assemble') assemble = handler; } });
+  let forwarded = false;
+  const result = await assemble({}, {}, async () => { forwarded = true; return { tools: [
+    { name: 'working_directory' }, { name: 'memory_remember' }, { name: 'mcp__snowluma__qq_send_message' },
+    { name: 'qq_load_tools' }, { name: 'qq_compress_context' },
+  ] }; });
+  assert.ok(forwarded);
+  assert.deepEqual(result.tools.map(tool => tool.name), ['mcp__snowluma__qq_send_message', 'qq_load_tools', 'qq_compress_context']);
+});
+
 test('QQ preset hides all eight native memory tools, shadows their guide, and preserves scoped QQ memory', () => {
   const hidden = [], sections = []; let guard;
   apply({ tools: { restrict: ({ deny }) => hidden.push(...deny), guard: fn => { guard = fn; } },

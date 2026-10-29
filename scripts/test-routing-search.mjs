@@ -86,7 +86,8 @@ test('source token cannot read target messages, but can hand off; existing turns
     assert.equal(current.capabilities.handoffEnabled, true);
     assert.equal(current.capabilities.searchEnabled, true);
     assert.equal(current.capabilities.searchProvider, 'bing');
-    assert.match(current.capabilities.routing, /无需对方先@/);
+    assert.equal(current.capabilities.detailsTool, 'qq_get_prompt');
+    assert.equal(Object.hasOwn(current.capabilities, 'routing'), false);
     const lookup = await (await fetch(url + '/api/socialV2/integrations/contact-lookup', { method: 'POST', headers,
       body: JSON.stringify({ key: 'private:12345', query: '哥布林檎' }) })).json();
     assert.equal(lookup.conversations[0].key, 'private:23456');
@@ -94,7 +95,8 @@ test('source token cannot read target messages, but can hand off; existing turns
       body: JSON.stringify({ key: 'private:12345', targetKey: 'group:456', content: '协作测试', requestId: 'routing_bridge_01' }) });
     assert.equal(response.status, 200); assert.equal((await response.json()).queued, true);
     assert.equal(h.calls.sent.length, 0);
-    assert.match(h.buildWakePromptV2('private:12345', 'test'), /当前已启用/);
-    assert.match(h.buildWakePromptV2('private:12345', 'test'), /qq_find_contact/);
+    assert.match(h.buildWakePromptV2('private:12345', 'test'), /qq_get_prompt\(topic=/);
+    assert.match(h.buildWakePromptV2('private:12345', 'specialist', 'web'), /当前已启用/);
+    assert.match(h.buildWakePromptV2('private:12345', 'specialist', 'delivery'), /qq_find_contact/);
   } finally { if (server) await new Promise(resolve => server.close(resolve)); await h.close(); }
 });

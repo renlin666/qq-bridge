@@ -4,10 +4,6 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import { SENSITIVE_RE } from './sensitive.js';
 
-export function friendApproverQQ(config) {
-  const value = String(config?.ownerQQ ?? '');
-  return /^[1-9]\d{4,11}$/.test(value) ? value : '';
-}
 const DAY = 86400000;
 const fail = (message, statusCode = 403) => { throw Object.assign(new Error(message), { statusCode }); };
 export function requestFriendUi(id) {
@@ -31,9 +27,8 @@ export function requestFriendUi(id) {
 
 export function createFriendApproval({ stateDir, getConfig, getConversation, sessionAllowed, onebot,
   notify, dispatchUi = requestFriendUi, now = Date.now, log = () => {} }) {
-  const FRIEND_APPROVER = friendApproverQQ(getConfig());
-  const ADMIN = FRIEND_APPROVER ? `private:${FRIEND_APPROVER}` : '';
-  const approverUnchanged = () => !!FRIEND_APPROVER && friendApproverQQ(getConfig()) === FRIEND_APPROVER;
+  const FRIEND_APPROVER = String(getConfig().ownerQQ || '');
+  const ADMIN = `private:${FRIEND_APPROVER}`;
   const file = path.join(stateDir, 'friend-requests.json');
   let rows = [];
   if (fs.existsSync(file)) {
@@ -53,7 +48,7 @@ export function createFriendApproval({ stateDir, getConfig, getConversation, ses
     const q = getConfig().integrations?.qzone;
     return q?.enabled === true && q.friendsEnabled === true && q.allowedKeys?.includes(key) && sessionAllowed(key);
   };
-  const check = key => { if (!approverUnchanged() || !enabled(key) || !sessionAllowed(ADMIN)) fail('好友审批功能或管理员私聊未获授权'); };
+  const check = key => { if (!/^[1-9]\d{4,11}$/.test(FRIEND_APPROVER) || String(getConfig().ownerQQ || '') !== FRIEND_APPROVER || !enabled(key) || !sessionAllowed(ADMIN)) fail('好友审批功能或管理员私聊未获授权'); };
   const view = row => ({ id: row.id, targetUserId: row.targetUserId, status: row.status,
     approverQQ: FRIEND_APPROVER, requestSubmitted: row.status === 'request_submitted' || row.status === 'friends',
     isFriend: row.status === 'friends', notifiedAdmin: row.notifiedAdmin === true, detail: row.detail,
@@ -125,7 +120,7 @@ export function createFriendApproval({ stateDir, getConfig, getConversation, ses
     if (busy) return;
     busy = true;
     try {
-      const authorized = row => approverUnchanged() && enabled(row.key) && sessionAllowed(ADMIN);
+      const authorized = row => /^[1-9]\d{4,11}$/.test(FRIEND_APPROVER) && String(getConfig().ownerQQ || '') === FRIEND_APPROVER && enabled(row.key) && sessionAllowed(ADMIN);
       const cancel = row => {
         row.status = 'cancelled_authorization';
         row.detail = '来源会话或好友审批授权已撤销，批准已作废，未操作添加。';

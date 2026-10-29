@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { apply, inputTokenUpperBound, LIMIT_CODE } from '../plugins/qq-agent-presets/qq-cost-guard.mjs';
 import { CONTINUE_TEXT } from '../plugins/qq-agent-presets/qq-platform-policy.mjs';
-import { grantOwnerCostExemption, consumeOwnerCostExemption } from '../src/qq-cost-policy.js';
+import { grantOwnerCostExemption, consumeOwnerCostExemption, isAccountQuotaExceeded } from '../src/qq-cost-policy.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { recordCostDelivery, readCostDelivery } from '../src/qq-cost-deliveries.js';
 
@@ -192,6 +192,23 @@ test('budget failures stay in backend activity, while unrelated errors still rea
     assert.match(fs.readFileSync(path.join(h.temp, 'state/qq-activity.log'), 'utf8'), /预算诊断/);
     await h.reportAgentError('private:123', { kind: 'error', error: { message: '服务不可用' } });
     assert.equal(h.calls.sent.length, 1);
+  } finally { await h.close(); }
+});
+
+test('account quota exhaustion is logged silently in both group and private chats', async () => {
+  const h = await bridgeHarness();
+  try {
+    const quotaMessage = '429: {"code":"AccountQuotaExceeded","message":"You have exceeded the 5-hour usage quota. It will reset at 2026-10-27 13:33:41 +0800 CST.","type":"TooManyRequests"}';
+    await h.reportAgentError('group:456', { kind: 'error', error: { message: quotaMessage } });
+    await h.reportAgentError('private:123', { kind: 'error', failure: { code: 'insufficient_quota', message: 'account quota exhausted' } });
+    assert.equal(h.calls.sent.length, 0);
+    assert.match(fs.readFileSync(path.join(h.temp, 'state/qq-activity.log'), 'utf8'), /AccountQuotaExceeded/);
+    for (const message of ['429: rate limit exceeded, retry later', '服务不可用', 'not enough tokens in the context window']) {
+      assert.equal(isAccountQuotaExceeded({ error: { message } }), false);
+      await h.reportAgentError('group:456', { kind: 'error', error: { message } });
+    }
+    assert.equal(h.calls.sent.length, 3);
+    assert.ok(h.calls.sent.every(x => x.kind === 'group'));
   } finally { await h.close(); }
 });
 

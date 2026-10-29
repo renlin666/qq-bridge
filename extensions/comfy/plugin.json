@@ -1,0 +1,38 @@
+{
+  "id": "comfy",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "./index.js",
+  "capabilities": ["comfy.generate"],
+  "tools": [
+    {
+      "name": "qq_generate_video",
+      "description": "按当前会话真实用户请求，用本机ComfyUI MiniMax-H3生成约2.3秒512x320短视频，可只传文字，也可用本会话真实图片作为首帧。requestMessageId绑定真实生成请求，prompt描述画面和运动；不能传工作流、本地路径或URL。requestId稳定复用，返回jobId后每隔10～30秒用qq_get_local_generation查询，不重复创建。完成不等于发送；观察预览后用qq_send_generated_video。电脑离线如实说明，视频火山回退尚未配置，不假报成功。",
+      "timeoutMs": 45000,
+      "inputSchema": {"type":"object","properties":{
+        "requestMessageId":{"type":["string","number"]},
+        "prompt":{"type":"string","minLength":1,"maxLength":1000},
+        "imageMessageId":{"type":["string","number"]},
+        "imageIndex":{"type":"integer","minimum":1,"maximum":3},
+        "requestId":{"type":"string","pattern":"^[A-Za-z0-9_-]{8,100}$"}
+      },"required":["requestMessageId","prompt","requestId"],"additionalProperties":false}
+    },
+    {
+      "name": "qq_get_local_generation",
+      "description": "查询当前会话发起的本地图片/视频任务；jobId来自生成结果或超时提示。queued/running时约10～30秒后再查；failed如实说明。ready图片返回可观察预览及imageId，再用qq_send_image；视频只展示预览帧，不能据此声称看完视频，发送用qq_send_generated_video。sent=true且delivery.verified=true和真实messageId才表示视频发送已回读确认。",
+      "timeoutMs": 45000,
+      "inputSchema":{"type":"object","properties":{"jobId":{"type":"string","pattern":"^gen_[a-f0-9]{32}$"}},"required":["jobId"],"additionalProperties":false}
+    },
+    {
+      "name": "qq_send_generated_video",
+      "description": "把当前会话已生成且ready的本地视频发回当前QQ窗口。仅接受真实jobId，不能传路径、URL、任意视频或其他会话任务。发送意图持久化，超时后查询同一jobId，禁止新建任务或换编号重发。sent=true且delivery.verified=true、有真实messageId才可说已发送，这不代表对方已读或播放成功。明确说明AI生成。",
+      "timeoutMs": 180000,
+      "inputSchema":{"type":"object","properties":{"jobId":{"type":"string","pattern":"^gen_[a-f0-9]{32}$"}},"required":["jobId"],"additionalProperties":false}
+    }
+  ],
+  "configSchema":{"type":"object","properties":{
+    "enabled":{"type":"boolean"},"tokenFile":{"type":"string"},
+    "videoGenerationEnabled":{"type":"boolean"},"videoSendEnabled":{"type":"boolean"},
+    "volcanoFallbackEnabled":{"type":"boolean"}
+  },"additionalProperties":false}
+}

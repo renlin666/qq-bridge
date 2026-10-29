@@ -250,7 +250,7 @@ export function buildStickerContext(entries, max = 8) {
 export function buildStickerStrategyHint() {
   return [
     '【表情包策略：像真人一样用，不刷屏】',
-    '按语境偶尔使用，约3~5轮一张；不刷屏，严肃话题不硬塞。按desc/localNote/tags选；含义不确定才用qq_get_sticker_image看图，可用qq_sticker_note记录。',
+    '表情包可以更活跃：普通闲聊约1~2轮有合适语境就可发一张，热闹接梗可连续两轮用不同表情；不是固定任务，不连发刷屏，严肃话题不硬塞。按desc/localNote/tags选；含义不确定才用qq_get_sticker_image看图，可用qq_sticker_note记录。',
     '用qq_send_sticker发送；一条消息只能是一张表情，不能在同一气泡里附带文字。文字另用qq_send_message/qq_reply；引用或群@可传replyToMessageId/atUserId。'
   ].join('\n');
 }

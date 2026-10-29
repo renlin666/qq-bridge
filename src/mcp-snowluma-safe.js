@@ -538,11 +538,12 @@ server.tool(
 // ── 二代仿真模式（reserved2）工具 ─────────────────────────────────────────
 server.tool(
   'qq_get_prompt',
-  '查看当前二代仿真模式的提示词/角色/推荐值/可用工具/当前唤醒配置（只读）。',
-  { key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'), token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）') },
-  async ({ key, token }) => {
+  '只读查看角色/推荐值/能力。topic可按需仅取专项流程；首次、角色改变或压缩后设定缺失再读，无需每轮重读。',
+  { key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'), token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
+    topic: z.enum(['video', 'delivery', 'images', 'history', 'friends', 'web', 'stickers']).optional().describe('仅取本主题说明，省略返回角色与状态') },
+  async ({ key, token, topic }) => {
     try {
-      const data = await agentApi(`/api/socialV2/prompt?key=${encodeURIComponent(key)}`, { headers: { 'x-agent-token': token } });
+      const data = await agentApi(`/api/socialV2/prompt?key=${encodeURIComponent(key)}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}`, { headers: { 'x-agent-token': token } });
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `获取提示词失败：${error?.message ?? error}` }], isError: true };
@@ -1038,7 +1039,7 @@ if (cfg.socialV2?.tools?.getImages !== false) {
         const textParts = [];
         for (const img of images) {
           if (img?.data && img?.mimeType) {
-            textParts.push(`[${img.kind === 'face' ? '表情' : '图片'}${img.index ?? ''}${img.text ? ' ' + img.text : ''}]`);
+            textParts.push(`[${img.kind === 'face' ? '表情' : '图片'}${img.index ?? ''}${img.text ? ' ' + img.text : ''}${img.preview?.note && img.text !== img.preview.note ? '（' + img.preview.note + '）' : ''}]`);
             content.push({ type: 'image', mimeType: img.mimeType, data: img.data });
           } else {
             textParts.push(`[${img.kind === 'face' ? '表情' : '图片'}${img.index ?? ''}${img.text ? ' ' + img.text : '（获取失败）'}]`);
@@ -1047,7 +1048,9 @@ if (cfg.socialV2?.tools?.getImages !== false) {
         if (textParts.length) {
           content.unshift({ type: 'text', text: `消息 ${messageId} 的媒体内容（${images.length} 项）：\n${textParts.join('\n')}` });
         }
-        return { content };
+        const failed = !content.some(block => block.type === 'image') && images.some(img => img.kind !== 'face');
+        if (failed) content.push({ type: 'text', text: '未取得实际图像。只能说明暂时没有读到图片，不能声称看到了白框、空白画面或其他内容。' });
+        return { content, ...(failed ? { isError: true } : {}) };
       } catch (error) {
         return { content: [{ type: 'text', text: `获取图片失败：${error?.message ?? error}` }], isError: true };
       }

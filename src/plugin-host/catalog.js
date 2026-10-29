@@ -3,7 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 export const EXTENSION_API_VERSION = 1;
-export const BUILTIN_IDS = Object.freeze(['bilibili', 'image-search', 'quark', 'qzone', 'social-memory']);
+export const BUILTIN_IDS = Object.freeze(['bilibili', 'image-search', 'quark', 'qzone', 'social-memory', 'ark', 'esports', 'comfy', 'sts2', 'singing']);
 export const ID_RE = /^[a-z][a-z0-9-]{0,47}$/;
 export const TOOL_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -20,6 +20,7 @@ export function extensionEnabled(id, cfg) {
   if (entry?.enabled === true) return true;
   if (id === 'bilibili') return cfg.integrations?.bilibili?.enabled !== false;
   if (id === 'image-search') return true; // The service enforces per-tool search/send switches.
+  if (id === 'esports') return cfg.integrations?.esports?.enabled !== false;
   if (id === 'quark' || id === 'qzone') return cfg.integrations?.[id]?.enabled === true;
   return false;
 }

@@ -98,7 +98,7 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
         content: clean(c.content), time: Number(c.time) || 0, parentId: null });
       for (const r of (c.replies ?? [])) if (r?.comment_id && r.uin) all.push({
         commentId: String(r.comment_id), userId: String(r.uin), name: clean(r.name).slice(0, 64),
-        content: clean(r.content), time: Number(r.time) || 0, parentId: String(c.comment_id) });
+        content: clean(r.content), time: Number(r.time) || 0, parentId: String(c.comment_id), parentUserId: String(c.uin) });
     }
     return all;
   }
@@ -127,14 +127,19 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
     if (!response.ok) fail('空间互动接口请求失败；请核实结果后再操作', 502);
     let value;
     try { value = JSON.parse(await response.text()); } catch { fail('空间互动结果未确认；请到空间核实，勿换编号重试', 502); }
-    if ((value.code !== 0 && value.ret !== 0) || (value.code != null && value.code !== 0)
-      || (value.ret != null && value.ret !== 0) || (value.subcode != null && value.subcode !== 0)) fail('空间互动未成功确认；请到空间核实', 502);
+    const codes = ['code', 'ret', 'subcode'].filter(k => value[k] != null);
+    if (codes.some(k => Number(value[k]) !== 0)) {
+      throw Object.assign(new Error('空间接口拒绝互动（' + codes.map(k => `${k}=${Number(value[k])}`).join(',') + '），请刷新评论后再处理'), { statusCode: 502, qzoneRejected: true });
+    }
+    if (!codes.some(k => k !== 'subcode')) fail('空间互动未成功确认；请到空间核实', 502);
     return value;
   }
   async function reply(bot, owner, tid, target, content, authorize) {
     return webWrite(bot, owner, 'taotao.qzone.qq.com/cgi-bin/emotion_cgi_re_feeds', {
       hostUin: owner, uin: bot, topicId: `${owner}_${tid}`, content: `@{uin:${target.userId},nick:${target.userId},auto:1} ${content}`,
-      paramstr: '2', commentId: target.parentId || target.commentId, commentUin: target.userId,
+      // Two levels only: the thread anchor belongs to the root author;
+      // the mentioned/replied user may be a different person in that thread.
+      paramstr: '2', commentId: target.parentId || target.commentId, commentUin: target.parentUserId || target.userId,
       replyUin: target.userId, t2_uin: target.userId, t2_tid: target.parentId || target.commentId,
       t1_uin: owner, t1_tid: tid, t1_source: '1', t1_commentid: target.parentId || target.commentId,
       t1_uin_to: target.userId, inCharset: 'utf-8', outCharset: 'utf-8', format: 'json',
@@ -167,7 +172,7 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
       if (owner !== bot && !state.posts.some(p => p.accountId === bot && ownerOf(p) === owner && p.readKeys?.includes(key))) {
         const friends = await onebot('get_friend_list', {});
         if (!Array.isArray(friends)) fail('好友列表响应无效，无法判断是否为好友；不能推断对方空间权限，请稍后再查', 502);
-        if (!friends.some(f => String(f.user_id) === owner)) fail(`QZONE_NOT_FRIEND: ${owner} 不在真实 QQ 好友列表，也不是本会话已读取的动态作者。桥接规则在访问空间前拦截，未验证对方空间权限；不要说对方设了权限或网页打不开。若是当前发言人邀请看空间，可调用 qq_request_friend_approval，先私聊配置的管理员 申请批准；未批准不得添加。可以向对方说明审批限制。`, 403);
+        if (!friends.some(f => String(f.user_id) === owner)) fail(`QZONE_NOT_FRIEND: ${owner} 不在真实 QQ 好友列表，也不是本会话已读取的动态作者。桥接规则在访问空间前拦截，未验证对方空间权限；不要说对方设了权限或网页打不开。若是当前发言人邀请看空间，可调用 qq_request_friend_approval，先私聊管理员申请批准；未批准不得添加。可以向对方说明审批限制。`, 403);
       }
       return { posts: await posts(bot, owner, key, position(body.pos)) };
     }
@@ -194,8 +199,8 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
     const old = state.actions.find(a => a.accountId === bot && a.key === key && a.requestId === requestId);
     if (old) {
       if (old.digest !== digest) fail('requestId 已被其他评论内容使用', 409);
-      if (old.status !== 'confirmed') fail('上次评论结果未确认，请先到空间核实', 409);
-      return { confirmed: true, duplicate: true, ...(isLike ? { liked: true } : {}), commentId: old.commentId };
+      if (old.status === 'confirmed') return { confirmed: true, duplicate: true, ...(isLike ? { liked: true } : {}), commentId: old.commentId };
+      if (old.status !== 'rejected') fail('上次评论结果未确认，请先到空间核实', 409);
     }
     const same = state.actions.find(a => a.accountId === bot && a.digest === digest);
     if (isLike && same) {
@@ -204,7 +209,7 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
     }
     if (acting) fail('正在提交另一条空间互动', 429);
     const interval = isLike ? Math.max(0, Number(options().likeIntervalSeconds ?? 60)) * 1000 : 30000;
-    if (state.actions.some(a => a.accountId === bot && (a.digest === digest || Date.now() - a.at < interval))) fail('相同互动已提交或空间互动仍在冷却', 429);
+    if (state.actions.some(a => a.accountId === bot && a.status !== 'rejected' && (a.digest === digest || Date.now() - a.at < interval))) fail('相同互动已提交或空间互动仍在冷却', 429);
     const today = state.actions.filter(a => a.accountId === bot && Date.now() - a.at < 86400000);
     const likes = a => String(a.action ?? '').startsWith('qzone-like');
     if (today.filter(a => isLike ? likes(a) : !likes(a)).length >= (isLike ? Math.max(1, Math.min(60, Number(options().maxLikesPerDay) || 20)) : 30)) fail('空间互动达到每日上限', 429);
@@ -227,16 +232,23 @@ export function createQzoneSocial({ stateDir, getConfig, onebot, sessionAllowed,
       if (isLike && !commentLike) await comments(bot, tid, 0, owner);
       authorize();
       if (!allowed(key) || options().commentsEnabled !== true) fail('空间互动权限已撤销', 403);
-      const record = { accountId: bot, ownerUserId: owner, tid, action, key, requestId, digest, reason: isLike ? reason : undefined, at: Date.now(), status: 'pending' };
-      state.actions.push(record); save();
+      const record = old ?? { accountId: bot, ownerUserId: owner, tid, action, key, requestId, digest };
+      Object.assign(record, { reason: isLike ? reason : undefined, at: Date.now(), status: 'pending',
+        targetCommentId: target?.commentId, targetUserId: target?.userId, parentCommentId: target?.parentId });
+      if (!old) state.actions.push(record); save();
       const recheck = () => { authorize(); if (!allowed(key) || options().commentsEnabled !== true
         || (owner !== bot && !friendsEnabled()) || (isLike && options().likesEnabled !== true)) fail('空间互动权限已撤销', 403); };
       recheck();
       let result;
+      try {
       if (commentLike) result = await likeComment(bot, owner, tid, target, recheck);
       else if (isLike) { await onebot('like_qzone', { tid, target_uin: Number(owner), abstime: post.time || 0 }); result = {}; }
       else result = target ? await reply(bot, owner, tid, target, content, recheck)
         : await onebot('comment_qzone', { tid, content, ...(owner !== bot ? { target_uin: Number(owner) } : {}) });
+      } catch (error) {
+        if (error.qzoneRejected === true) { record.status = 'rejected'; save(); }
+        throw error;
+      }
       if (!isLike && !target && !result?.comment_id) fail('空间未返回评论 ID，结果未确认，请到空间核实', 502);
       record.status = 'confirmed'; record.commentId = String(result?.comment_id ?? result?.commentid ?? result?.commentId ?? ''); save();
       return { confirmed: true, ...(isLike ? { liked: true } : {}), targetUserId: owner,

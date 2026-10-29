@@ -144,7 +144,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   const path = await import('node:path');
   // 默认出厂配置是 voice.enabled=false（AI 不能发语音）；这里显式打开，
   // 才能测"打开之后"的各项闸门。关闭时的行为单独在下面钉一条。
-  const voiceOn = { socialV2: { voice: { enabled: true } } };
+  const voiceOn = { socialV2: { tools: { sendVoice: true }, voice: { enabled: true } } };
   const h = await bridgeHarness({ config: voiceOn });
   try {
     // 语音库 fixture：临时 config 的 ROOT 之下，voice.dir 默认 'audio'
@@ -219,7 +219,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     );
 
     // 7) 限流：语音额度独立计数，超限拒绝
-    const h3 = await bridgeHarness({ config: { socialV2: { voice: { enabled: true, maxPerMinute: 1, maxPerHour: 2 } } } });
+    const h3 = await bridgeHarness({ config: { socialV2: { tools: { sendVoice: true }, voice: { enabled: true, maxPerMinute: 1, maxPerHour: 2 } } } });
     try {
       const dir3 = path.join(h3.temp, 'audio');
       fs.mkdirSync(dir3, { recursive: true });
@@ -231,7 +231,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
         '同一分钟内第二条语音被限流（每分钟 1 条）'
       );
       // 额度只在发出后才记账：参数错误不应吃掉配额
-      const h4 = await bridgeHarness({ config: { socialV2: { voice: { enabled: true, maxPerMinute: 1, maxPerHour: 2 } } } });
+      const h4 = await bridgeHarness({ config: { socialV2: { tools: { sendVoice: true }, voice: { enabled: true, maxPerMinute: 1, maxPerHour: 2 } } } });
       try {
         const dir4 = path.join(h4.temp, 'audio');
         fs.mkdirSync(dir4, { recursive: true });
@@ -244,13 +244,13 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     } finally { await h3.close(); }
 
     // 8) 语音功能总开关关闭时，**AI 通道**彻底拒绝
-    const h5 = await bridgeHarness({ config: { socialV2: { voice: { enabled: false } } } });
+    const h5 = await bridgeHarness({ config: { socialV2: { tools: { sendVoice: true }, voice: { enabled: false } } } });
     try {
       await assert.rejects(() => h5.sendVoiceForV2('group:456', 'a.mp3'), /已关闭/, 'voice.enabled=false 时 AI 通道拒绝发送');
     } finally { await h5.close(); }
 
     // 9) 但**操作者通道**不受这个开关影响：否则"默认不启用"会变成"连手动试发都做不了"
-    const h6 = await bridgeHarness({ config: { socialV2: { voice: { enabled: false } } } });
+    const h6 = await bridgeHarness({ config: { socialV2: { tools: { sendVoice: true }, voice: { enabled: false } } } });
     try {
       const dir6 = path.join(h6.temp, 'audio');
       fs.mkdirSync(dir6, { recursive: true });
@@ -301,7 +301,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
 {
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const h = await bridgeHarness({ config: { socialV2: { voice: { enabled: true, allowAbsolutePath: true, maxPerMinute: 50, maxPerHour: 50 } } } });
+  const h = await bridgeHarness({ config: { socialV2: { tools: { sendVoice: true }, voice: { enabled: true, allowAbsolutePath: true, maxPerMinute: 50, maxPerHour: 50 } } } });
   try {
     const libraryDir = path.join(h.temp, 'audio');
     const outsideDir = path.join(h.temp, 'outside');

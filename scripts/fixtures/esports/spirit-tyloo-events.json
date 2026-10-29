@@ -1,0 +1,495 @@
+{
+  "provenance": {
+    "capturedAt": "2026-10-26T02:06:58.538983+00:00",
+    "matchId": "csgo_mc_2399727",
+    "sources": [
+      "https://esports-data.5eplaycdn.com/v1/api/csgo/matches/csgo_mc_2399727/data",
+      "https://esports-data.5eplaycdn.com/v1/api/csgo/match/csgo_mc_2399727/event/log?update_version=0&limit=100"
+    ],
+    "note": "Real public responses, reduced to parser fields; empty log-envelope fields removed. Historical evidence, not a live-latency test. Only Anubis round 16 gameplay rows retained; not a complete source page."
+  },
+  "match": {
+    "mc_info": {
+      "id": "csgo_mc_2399727",
+      "format": "3",
+      "plan_ts": "1792915200",
+      "t1_info": {
+        "id": "csgo_tm_7020",
+        "disp_name": "Spirit"
+      },
+      "t2_info": {
+        "id": "csgo_tm_4863",
+        "disp_name": "TYLOO"
+      }
+    },
+    "tt_info": {
+      "id": "csgo_tt_8050",
+      "disp_name": "PGL 布加勒斯特大师赛 2026"
+    },
+    "global_state": {
+      "status": "2",
+      "t1_score": "2",
+      "t2_score": "0",
+      "bp_map_item": [
+        {
+          "bp_type": "ban",
+          "map_name": "Dust2",
+          "team_side": "t2"
+        },
+        {
+          "bp_type": "ban",
+          "map_name": "Inferno",
+          "team_side": "t1"
+        },
+        {
+          "bp_type": "pick",
+          "map_name": "Mirage",
+          "team_side": "t2"
+        },
+        {
+          "bp_type": "pick",
+          "map_name": "Anubis",
+          "team_side": "t1"
+        },
+        {
+          "bp_type": "ban",
+          "map_name": "Cache",
+          "team_side": "t1"
+        },
+        {
+          "bp_type": "ban",
+          "map_name": "Ancient",
+          "team_side": "t2"
+        },
+        {
+          "bp_type": "left",
+          "map_name": "Nuke",
+          "team_side": ""
+        }
+      ],
+      "t1_player_stats": [
+        {
+          "id": "csgo_pl_21167",
+          "name": "donk",
+          "kill": "36",
+          "death": "18",
+          "assist": "5",
+          "rating": "1.53"
+        },
+        {
+          "id": "csgo_pl_18317",
+          "name": "magixx",
+          "kill": "30",
+          "death": "18",
+          "assist": "12",
+          "rating": "1.46"
+        },
+        {
+          "id": "csgo_pl_16920",
+          "name": "sh1ro",
+          "kill": "27",
+          "death": "12",
+          "assist": "6",
+          "rating": "1.37"
+        },
+        {
+          "id": "csgo_pl_19808",
+          "name": "tN1R",
+          "kill": "20",
+          "death": "17",
+          "assist": "10",
+          "rating": "1.28"
+        },
+        {
+          "id": "csgo_pl_20423",
+          "name": "zont1x",
+          "kill": "27",
+          "death": "14",
+          "assist": "10",
+          "rating": "1.20"
+        }
+      ],
+      "t2_player_stats": [
+        {
+          "id": "csgo_pl_20702",
+          "name": "Jee",
+          "kill": "21",
+          "death": "27",
+          "assist": "3",
+          "rating": "0.88"
+        },
+        {
+          "id": "csgo_pl_19645",
+          "name": "JamYoung",
+          "kill": "17",
+          "death": "29",
+          "assist": "3",
+          "rating": "0.78"
+        },
+        {
+          "id": "csgo_pl_20895",
+          "name": "Mercury",
+          "kill": "15",
+          "death": "28",
+          "assist": "6",
+          "rating": "0.75"
+        },
+        {
+          "id": "csgo_pl_24857",
+          "name": "Zero",
+          "kill": "15",
+          "death": "29",
+          "assist": "9",
+          "rating": "0.72"
+        },
+        {
+          "id": "csgo_pl_21621",
+          "name": "Moseyuh",
+          "kill": "10",
+          "death": "29",
+          "assist": "5",
+          "rating": "0.55"
+        }
+      ]
+    },
+    "bouts_state": [
+      {
+        "bout_num": "1",
+        "map_name": "Mirage",
+        "status": "2",
+        "start_time": "1792915936",
+        "curr_round_num": "18",
+        "curr_bout_stage": "sh",
+        "t1_stats": {
+          "all_score": "13",
+          "fh_data": [
+            0,
+            4,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1
+          ],
+          "fh_role": "CT",
+          "fh_score": "8",
+          "flags": [
+            "w5",
+            "w10",
+            "r16"
+          ],
+          "id": "csgo_tm_7020",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "13",
+          "role": "T",
+          "sh_data": [
+            3,
+            2,
+            2,
+            3,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sh_role": "T",
+          "sh_score": "5"
+        },
+        "t2_stats": {
+          "all_score": "5",
+          "fh_data": [
+            2,
+            0,
+            0,
+            0,
+            2,
+            0,
+            2,
+            0,
+            0,
+            0,
+            2,
+            0
+          ],
+          "fh_role": "T",
+          "fh_score": "4",
+          "flags": [
+            "r1"
+          ],
+          "id": "csgo_tm_4863",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "5",
+          "role": "CT",
+          "sh_data": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sh_role": "CT",
+          "sh_score": "1"
+        }
+      },
+      {
+        "bout_num": "2",
+        "map_name": "Anubis",
+        "status": "2",
+        "start_time": "1792918640",
+        "curr_round_num": "16",
+        "curr_bout_stage": "sh",
+        "t1_stats": {
+          "all_score": "13",
+          "fh_data": [
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            1
+          ],
+          "fh_role": "CT",
+          "fh_score": "9",
+          "flags": [
+            "w5",
+            "w10",
+            "r16"
+          ],
+          "id": "csgo_tm_7020",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "13",
+          "role": "T",
+          "sh_data": [
+            2,
+            2,
+            3,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sh_role": "T",
+          "sh_score": "4"
+        },
+        "t2_stats": {
+          "all_score": "3",
+          "fh_data": [
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0,
+            3,
+            0,
+            0
+          ],
+          "fh_role": "T",
+          "fh_score": "3",
+          "flags": [
+            "r1"
+          ],
+          "id": "csgo_tm_4863",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "3",
+          "role": "CT",
+          "sh_data": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "sh_role": "CT",
+          "sh_score": "0"
+        }
+      },
+      {
+        "bout_num": "3",
+        "map_name": "Nuke",
+        "status": "-1",
+        "start_time": "",
+        "curr_round_num": "",
+        "curr_bout_stage": "",
+        "t1_stats": {
+          "all_score": "",
+          "fh_data": [],
+          "fh_role": "",
+          "fh_score": "",
+          "flags": [],
+          "id": "",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "",
+          "role": "",
+          "sh_data": [],
+          "sh_role": "",
+          "sh_score": ""
+        },
+        "t2_stats": {
+          "all_score": "",
+          "fh_data": [],
+          "fh_role": "",
+          "fh_score": "",
+          "flags": [],
+          "id": "",
+          "ot_data": [],
+          "ot_role": "",
+          "ot_score": "",
+          "quick_score": "",
+          "role": "",
+          "sh_data": [],
+          "sh_role": "",
+          "sh_score": ""
+        }
+      }
+    ]
+  },
+  "events": [
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"2\",\"round_end\":{\"ct_score\":\"3\",\"t_score\":\"13\",\"winner\":\"T\",\"win_type\":\"Terrorists_Win\",\"win_type_app\":2}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920524750"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"magixx\",\"killer_nick\":\"magixx\",\"killer_side\":\"T\",\"victim_nick\":\"Zero\",\"victim_name\":\"Zero\",\"victim_side\":\"CT\",\"weapon\":\"hegrenade\",\"head_shot\":false,\"event_id\":\"4009047341\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"733\",\"victim_y\":\"1969\",\"killer_x\":\"685\",\"killer_y\":\"1311\",\"killer_id\":\"18317\",\"victim_id\":\"24857\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/cou3oksconklgsjvhgs0.png\"},\"assist\":{\"assister_name\":\"tN1R\",\"assister_nick\":\"tN1R\",\"assister_side\":\"T\",\"victim_nick\":\"Zero\",\"victim_name\":\"Zero\",\"victim_side\":\"CT\",\"kill_event_id\":\"4009047341\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920524590"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"Zero\",\"killer_nick\":\"Zero\",\"killer_side\":\"CT\",\"victim_nick\":\"tN1R\",\"victim_name\":\"tN1R\",\"victim_side\":\"T\",\"weapon\":\"m4a1\",\"head_shot\":false,\"event_id\":\"4009047303\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"1007\",\"victim_y\":\"1320\",\"killer_x\":\"680\",\"killer_y\":\"1959\",\"killer_id\":\"24857\",\"victim_id\":\"19808\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/cj4c4e4conkqks63akq0.png\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920522863"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"Zero\",\"killer_nick\":\"Zero\",\"killer_side\":\"CT\",\"victim_nick\":\"donk\",\"victim_name\":\"donk\",\"victim_side\":\"T\",\"weapon\":\"m4a1\",\"head_shot\":true,\"event_id\":\"4009047194\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"1016\",\"victim_y\":\"2204\",\"killer_x\":\"610\",\"killer_y\":\"1861\",\"killer_id\":\"24857\",\"victim_id\":\"21167\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/cj4c4e4conkqks63akq0.png\"},\"assist\":{\"assister_name\":\"Moseyuh\",\"assister_nick\":\"Moseyuh\",\"assister_side\":\"CT\",\"victim_nick\":\"donk\",\"victim_name\":\"donk\",\"victim_side\":\"T\",\"kill_event_id\":\"4009047194\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920517833"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"tN1R\",\"killer_nick\":\"tN1R\",\"killer_side\":\"T\",\"victim_nick\":\"Mercury\",\"victim_name\":\"Mercury\",\"victim_side\":\"CT\",\"weapon\":\"ak47\",\"head_shot\":true,\"event_id\":\"4009047189\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"812\",\"victim_y\":\"1900\",\"killer_x\":\"760\",\"killer_y\":\"1291\",\"killer_id\":\"19808\",\"victim_id\":\"20895\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/equipmente788babdbcd6afcb629ddbaf1c372534.png\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920517670"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"6\",\"bomb_planted\":{\"player_name\":\"zont1x\",\"player_nick\":\"zont1x\",\"ct_players\":\"2\",\"t_players\":\"4\",\"bomb_site\":\"A\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920494412"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"donk\",\"killer_nick\":\"donk\",\"killer_side\":\"T\",\"victim_nick\":\"Jee\",\"victim_name\":\"Jee\",\"victim_side\":\"CT\",\"weapon\":\"ak47\",\"head_shot\":true,\"event_id\":\"4009046590\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"960\",\"victim_y\":\"1442\",\"killer_x\":\"1475\",\"killer_y\":\"1942\",\"killer_id\":\"21167\",\"victim_id\":\"20702\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/equipmente788babdbcd6afcb629ddbaf1c372534.png\"},\"assist\":{\"assister_name\":\"zont1x\",\"assister_nick\":\"zont1x\",\"assister_side\":\"T\",\"victim_nick\":\"Jee\",\"victim_name\":\"Jee\",\"victim_side\":\"CT\",\"kill_event_id\":\"4009046590\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920478296"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"magixx\",\"killer_nick\":\"magixx\",\"killer_side\":\"T\",\"victim_nick\":\"JamYoung\",\"victim_name\":\"JamYoung\",\"victim_side\":\"CT\",\"weapon\":\"galilar\",\"head_shot\":true,\"event_id\":\"4009046540\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"-6\",\"victim_y\":\"527\",\"killer_x\":\"-189\",\"killer_y\":\"-184\",\"killer_id\":\"18317\",\"victim_id\":\"19645\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/equipment9f6ffac14f032083deb9c93f8371f073.png\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920476338"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"Jee\",\"killer_nick\":\"Jee\",\"killer_side\":\"CT\",\"victim_nick\":\"sh1ro\",\"victim_name\":\"sh1ro\",\"victim_side\":\"T\",\"weapon\":\"awp\",\"head_shot\":false,\"event_id\":\"4009046469\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"1655\",\"victim_y\":\"1881\",\"killer_x\":\"759\",\"killer_y\":\"1473\",\"killer_id\":\"20702\",\"victim_id\":\"16920\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/cj65i2cconkqks63al80.png\"},\"assist\":{\"assister_name\":\"Moseyuh\",\"assister_nick\":\"Moseyuh\",\"assister_side\":\"CT\",\"victim_nick\":\"sh1ro\",\"victim_name\":\"sh1ro\",\"victim_side\":\"T\",\"kill_event_id\":\"4009046469\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920473377"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"8\",\"kill\":{\"killer_name\":\"donk\",\"killer_nick\":\"donk\",\"killer_side\":\"T\",\"victim_nick\":\"Moseyuh\",\"victim_name\":\"Moseyuh\",\"victim_side\":\"CT\",\"weapon\":\"ak47\",\"head_shot\":false,\"event_id\":\"4009046275\",\"flasher_nick\":\"\",\"flasher_side\":\"\",\"victim_x\":\"1681\",\"victim_y\":\"1572\",\"killer_x\":\"1499\",\"killer_y\":\"820\",\"killer_id\":\"21167\",\"victim_id\":\"21621\",\"penetrated\":false,\"through_smoke\":false,\"no_scope\":false,\"killer_blind\":false,\"weapon_logo\":\"https://oss.5eplay.com/cloudx/p/sport/csgo/equipment/equipmente788babdbcd6afcb629ddbaf1c372534.png\"},\"assist\":{\"assister_name\":\"sh1ro\",\"assister_nick\":\"sh1ro\",\"assister_side\":\"T\",\"victim_nick\":\"Moseyuh\",\"victim_name\":\"Moseyuh\",\"victim_side\":\"CT\",\"kill_event_id\":\"4009046275\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920465466"
+    },
+    {
+      "bout_id": "csgo_mc_2399727_2",
+      "bout_num": "2",
+      "log_info": "{\"type\":\"1\",\"round_start\":{\"round_num\":\"16\",\"map\":\"Anubis\",\"bout_num\":\"2\"}}",
+      "map_name": "Anubis",
+      "match_id": "csgo_mc_2399727",
+      "tt_id": "csgo_tt_8050",
+      "update_version": "1792920450195"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import { videoMessageView } from './qq-model-view.js';
 export const PEAK_ECONOMY_DEFAULTS = Object.freeze({
   enabled: false, mode: 'auto', probability: 0.2, minIntervalMs: 900000, replyChars: 80
 });
-const protectedReasons = new Set(['private', 'atMention', 'bootstrap', 'admin', 'poke', 'video']);
+const protectedReasons = new Set(['private', 'atMention', 'bootstrap', 'admin', 'poke', 'video', 'conversationFollowup']);
 
 export function peakEconomyConfig(value) {
   const c = value && typeof value === 'object' && !Array.isArray(value) ? value : {};

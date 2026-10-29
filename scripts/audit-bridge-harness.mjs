@@ -25,9 +25,15 @@ import * as bilibili from '../src/bilibili.js';
 import * as integrations from '../src/qq-integrations.js';
 import * as socialHub from '../src/social-hub.js';
 import * as imageSearch from '../src/image-search.js';
+import * as imagePreview from '../src/image-preview.js';
 import * as memoryPolicy from '../src/qq-memory-policy.js';
 import * as continuation from '../src/output-continuation.js';
+import { RestartRecovery } from '../src/restart-recovery.js';
+import { ConversationSessions, summaryEnvelope, redactHistoricalTokens } from '../src/conversation-sessions.js';
+import { STS2_CHAT_GUIDANCE } from '../src/sts2-service.js';
 import { directlyMentionsBot } from '../src/video-watch-policy.js';
+import * as promptContext from '../src/prompt-context.js';
+import { isConversationFollowup } from '../src/conversation-followup.js';
 import * as peakEconomy from '../src/peak-economy.js';
 import * as costPolicy from '../src/qq-cost-policy.js';
 import * as costDeliveries from '../src/qq-cost-deliveries.js';
@@ -130,13 +136,14 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   source = source.replace('  bot.onPrivateMessage(async (event) => {', `
   return {
     ensureSession, ensureSlangLearnerSession, resolvePresetName, deliverPrompt, drainPromptQueue,
+    conversationSessions, reconcileGameSession, requestGameSession,
     closeExtensions: () => closeProjectExtensions(),
     sendToQQ, sendStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues, reportAgentError,
     sendMessagesV2, sendContactPartV2,
     getSocialV2State, appendSocialV2Message, recordSentMessagesV2,
     buildWakePromptV2, buildWakeSnapshotV2, sendWakePromptV2, socialV2,
     refreshMode, modeAllowed, trackTurnEvent, replayPendingWakeReasonsV2,
-    collectors, setupSleepTimerV2,
+    collectors, setupSleepTimerV2, scheduleWakeV2,
     getInitialPrompt, setInitialPrompt, loadInitialPrompts, formatInitialPromptV2,
     initialPrompts, initialPromptMaxChars,
     extractMediaFromSegments, segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
@@ -172,9 +179,10 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     clearTimeout, setInterval: () => ({ unref() {} }), clearInterval: () => {},
     NodeApiClient: class { constructor() { return api; } },
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,
-    discoverDshLaunchToken: () => '', unwrap, createTurnCollector,
-    ...continuation, FLASH_MODELS, directlyMentionsBot,
-    ...peakEconomy, ...costPolicy, ...costDeliveries,
+    discoverDshLaunchToken: () => '', unwrap, createTurnCollector, RestartRecovery,
+    ConversationSessions, summaryEnvelope, redactHistoricalTokens, STS2_CHAT_GUIDANCE,
+    ...continuation, ...imagePreview, FLASH_MODELS, directlyMentionsBot, isConversationFollowup,
+    ...peakEconomy, ...costPolicy, ...costDeliveries, ...promptContext,
     ...roleCard,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker,
     ...modelPrices, ...tokenLedger, ...voiceLib, ...stateAcl, ...presetPrompt, ...bilibili, ...integrations, ...socialHub, ...imageSearch, ...memoryPolicy,

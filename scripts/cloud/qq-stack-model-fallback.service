@@ -1,0 +1,21 @@
+[Unit]
+Description=QQ stack model proxy (Chream primary, Qianwen MaaS fallback)
+Documentation=file:///opt/qq-stack/qq-bridge/scripts/cloud/qq-model-fallback.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qqbot
+Group=qqbot
+WorkingDirectory=/opt/qq-stack/qq-bridge
+Environment=DSH_HOME=/var/lib/qq-stack/dsh
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -u /opt/qq-stack/qq-bridge/scripts/cloud/qq-model-fallback.py
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

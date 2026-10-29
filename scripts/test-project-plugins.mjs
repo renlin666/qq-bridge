@@ -13,7 +13,7 @@ import { registerProjectExtensionTools } from '../src/mcp-project-extensions.js'
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const builtinsOff = Object.fromEntries(['bilibili', 'image-search', 'quark', 'qzone'].map(id => [id, { enabled: false }]));
+const builtinsOff = Object.fromEntries(['bilibili', 'image-search', 'quark', 'qzone', 'esports'].map(id => [id, { enabled: false }]));
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-project-plugins-'));
   const stateDir = path.join(root, 'state');

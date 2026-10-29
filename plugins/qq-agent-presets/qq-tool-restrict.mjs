@@ -22,6 +22,8 @@
 //    `tools.guard` 只能拒绝**执行**，工具名仍会出现在模型的 schema 里——
 //    那既不满足"仿真会话不得拥有本地执行能力"的注册期要求，也会诱导模型去调它。
 //    所以本地工具必须同时出现在下面的 restrict 名单里。
+import { installToolDiscovery } from './qq-tool-discovery.mjs'
+
 export const name = 'qq-tool-restrict'
 
 export const inject = ['tools', 'systemPrompt']
@@ -176,11 +178,20 @@ const SAFE_PREFIXES = [
 // 无害模型侧工具：ask_user_question 用于把问题转给管理员/用户，
 // todo_write 仅维护任务列表。若后续 preset 不再挂载这些工具，保留无害。
 const SAFE_EXACT = new Set([
+  'qq_load_tools',
+  'qq_context_status', 'qq_compress_context', 'qq_read_context',
   'ask_user_question',
   'todo_write',
 ])
 
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
+  // Keep the model-facing assembly aligned with the execution allowlist,
+  // including future and scope-local registrations that restrict() cannot hide.
+  ctx.on?.('system-prompt/assemble', async (_assembly, _context, next) => {
+    const assembly = await next();
+    return { ...assembly, tools: assembly.tools.filter(({ name }) =>
+      SAFE_EXACT.has(name) || SAFE_PREFIXES.some(prefix => name.startsWith(prefix))) };
+  })
   // 1) 把已知危险全局工具从 schema 隐藏（restrict 只影响继承的全局层，
   //    不会误删 preset 自己注册的 scoped 工具）。
   // 逐个 restrict：当前 DSH 版本不存在的工具名会单独抛错并跳过，
@@ -215,4 +226,5 @@ export function apply(ctx) {
     if (SAFE_PREFIXES.some((prefix) => name.startsWith(prefix))) return
     return `工具 "${name}" 不在 QQ 桥接白名单内，已拒绝（仅允许 QQ MCP 工具与无害模型侧工具）`
   })
+  if (config.discovery === true) installToolDiscovery(ctx)
 }

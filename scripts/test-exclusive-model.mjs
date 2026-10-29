@@ -4,6 +4,25 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { webSearch } from '../src/web-search.js';
 
 const config = { dsh: { provider: 'fixture-platform', model: 'fixture-1017', exclusiveModel: true, reasoningEffort: null } };
+
+for (const effort of ['off', 'medium']) test(`Ark ${effort} survives bridge startup and session reuse`, async () => {
+  const h = await bridgeHarness({ config: { dsh: {
+    provider: 'qq-ark', model: 'deepseek-v4.1-flash', exclusiveModel: true,
+    allowedModels: ['deepseek-v4.1-flash'], reasoningEffort: effort
+  } } });
+  const selections = [];
+  h.api.sessions.selectModel = async params => {
+    selections.push(params);
+    if (params.reasoningEffort !== effort) throw new Error('unsupported reasoning effort');
+    return { result: { ok: true, value: { selected: { ...params } } } };
+  };
+  try {
+    const id = await h.ensureSession('private:123');
+    assert.equal(await h.ensureSession('private:123'), id);
+    assert.equal(selections.length, 2);
+    assert.ok(selections.every(s => s.provider === 'qq-ark' && s.reasoningEffort === effort));
+  } finally { await h.close(); }
+});
 test('exclusive route is reasserted on reuse and omits unsupported reasoning effort', async () => {
   const h = await bridgeHarness({ config });
   const selections = [];
@@ -71,4 +90,29 @@ test('unavailable preferred selection falls back only to another allowed Flash',
     assert.deepEqual(calls.map(x => x.model), [models[0], models[0], models[1]]);
     assert.ok(calls.every(x => x.provider === 'qq-qianwen'));
   } finally { await h.close(); }
+});
+
+test('per-conversation model override is preserved across reuse without affecting other sessions', async () => {
+  const h = await bridgeHarness({ config: { dsh: { provider: 'qq-ark', model: 'deepseek-v4.1-flash', exclusiveModel: true,
+    allowedModels: ['deepseek-v4.1-flash'], reasoningEffort: 'high',
+    sessionModelOverrides: { 'private:123': { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'low' } } } } });
+  const selections = [];
+  h.api.sessions.selectModel = async params => { selections.push(params); return { result: { ok: true, value: { selected: { ...params } } } }; };
+  try {
+    const own = await h.ensureSession('private:123');
+    assert.equal(await h.ensureSession('private:123'), own);
+    await h.ensureSession('group:456');
+    assert.deepEqual(selections.map(({provider,model,reasoningEffort}) => ({provider,model,reasoningEffort})), [
+      {provider:'deepseek-official',model:'deepseek-flash',reasoningEffort:'low'},
+      {provider:'deepseek-official',model:'deepseek-flash',reasoningEffort:'low'},
+      {provider:'qq-ark',model:'deepseek-v4.1-flash',reasoningEffort:'high'}]);
+  } finally { await h.close(); }
+});
+
+test('per-conversation model refuses provider substitution even when global mode is not exclusive', async () => {
+  const h = await bridgeHarness({ config: { dsh: { exclusiveModel: false,
+    sessionModelOverrides: { 'private:123': { provider:'deepseek-official',model:'deepseek-flash' } } } } });
+  h.api.sessions.selectModel = async () => ({ result: { ok: true, value: { selected: { provider:'qq-ark',model:'deepseek-v4.1-flash' } } } });
+  try { await assert.rejects(h.ensureSession('private:123'), /禁止回退/); }
+  finally { await h.close(); }
 });

@@ -1,5 +1,6 @@
 """Offline UI authorization regressions. Never contacts Docker, X11 or QQ."""
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
@@ -15,6 +16,15 @@ class Row:
  def crop(self,box):return self
 
 class FriendTargetTests(unittest.TestCase):
+ def test_approval_requires_current_configured_owner(self):
+  with tempfile.TemporaryDirectory() as directory,patch.object(worker,'STACK',pathlib.Path(directory)):
+   root=pathlib.Path(directory);(root/'state').mkdir()
+   (root/'config.json').write_text(json.dumps({'ownerQQ':'123456'}))
+   (root/'state/friend-requests.json').write_text(json.dumps({'requests':[{'id':'a'*16,'status':'dispatching','approvedBy':'234567','approvalKey':'private:234567','approvalMessageId':'1'}]}))
+   with self.assertRaisesRegex(ValueError,'missing private administrator approval'):worker.approval('a'*16)
+   (root/'config.json').write_text(json.dumps({'ownerQQ':''}))
+   with self.assertRaisesRegex(ValueError,'invalid administrator'):worker.approval('a'*16)
+
  def check_row(self,text,buttons=None):
   with patch.object(worker,'ocr',return_value=text),patch.object(worker,'words',return_value=buttons if buttons is not None else [('添加',607,33)]):
    return worker.result_button(Row(),'123456789')

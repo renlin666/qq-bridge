@@ -14,6 +14,14 @@ import { parseSocialEvents } from './social-event-metadata.js';
 import { createFriendApproval } from './friend-approval.js';
 import { readMemoryLibrary } from './memory-library.js';
 import { readRelationships } from './relationship-view.js';
+import { createArkAssistant } from './ark-assistant.js';
+import { arkPaused } from './ark-client.js';
+import { embedLocal } from './local-embedding.js';
+import { createEsportsService } from './esports.js';
+import { createCsMemeService } from './cs-memes.js';
+import { createComfyService } from './comfy-service.js';
+import { createSts2Service } from './sts2-service.js';
+import { createSingingService } from './singing-service.js';
 
 export const INTEGRATION_PREFIX = '/api/socialV2/integrations/';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -23,9 +31,10 @@ const fail = (message, statusCode = 400) => { throw Object.assign(new Error(mess
 // Feature selection, schemas and tool registration belong to the project extensions.
 export function createIntegrations({ stateDir, getConfig, onebot, getConversation, sessionAllowed, tokenOk, socialHub,
   getConversations = () => [], getSelfId = () => '',
-  readMessageImages, readSelfImage, validateImage, notifyQzone = async () => {}, fetchImage = safeFetchBuffer,
-  readVideo = readBilibiliMedia, readMagnet = inspectMagnet, driveStatus = quarkStatus,
-  projectRoot = ROOT, localRoot, backgroundAllowed = () => true, log = () => {} }) {
+  readMessageImages, readSelfImage, validateImage, sendVideo, notifyQzone = async () => {}, fetchImage = safeFetchBuffer,
+  readVideo = readBilibiliMedia, readMagnet = inspectMagnet, driveStatus = quarkStatus, queryEsports,
+  projectRoot = ROOT, localRoot, backgroundAllowed = () => true, sanitizeExternalText = String, log = () => {},
+  onGameControl, onGameObservation, gameSessionReady }) {
   const effectiveConfig = () => {
     const cfg = getConfig();
     const integrations = { ...cfg.integrations };
@@ -57,8 +66,69 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       return [...(st?.recentMessages ?? []), ...(st?.unread ?? [])]
         .find(message => String(message.seq) === ref || String(message.messageId) === ref) ?? null;
   }
+  const comfy = createComfyService({ stateDir, getConfig, readMessage, readMessageImages, validateImage, sendVideo, onebot,
+    sanitizeText: sanitizeExternalText, storeImage: (key, buffer, title) => socialHub.storeGeneratedImage(key, buffer, title) });
+  const ark = createArkAssistant({ stateDir, projectRoot, getConfig, readMessage, onebot,
+    embed: embedLocal,
+    localGenerate: comfy.generateImage,
+    readMessageImages, validateImage, sanitizeText: sanitizeExternalText,
+    readSearchImage: (key, id) => socialHub.imageForSend(key, id).buffer,
+    storeImage: (key, buffer, title) => socialHub.storeGeneratedImage(key, buffer, title) });
+  const esports = queryEsports ? { query: queryEsports } : createEsportsService({ root: projectRoot });
+  const csMemes = createCsMemeService({ getConversation,
+    getConfig: () => extensionConfig('esports', getConfig()),
+    queryMatch: (args, config, authorize, signal) => esports.query(args, config, authorize, signal) });
+  const sts2 = createSts2Service({ stateDir, getConfig, readMessage, onControlChange: onGameControl,
+    onObservation: onGameObservation, sessionReady: gameSessionReady });
+  const singing = createSingingService({ stateDir, projectRoot, getConfig, readMessage });
   const host = createPluginHost({ root: projectRoot, localRoot, stateDir, getConfig, log, services: {
     readMessage,
+    'singing.generate': (key, args, authorize, signal) => singing.handle(key, args, authorize, signal),
+    'games.sts2': (key, args, authorize, signal) => sts2.handle(key, args, authorize, signal),
+    'comfy.generate': (key, args, authorize, signal) => comfy.handle(key, args, authorize, signal),
+    'cs-memes.context'(key, _args, authorize) { authorize(); return { active: csMemes.active(key, extensionConfig('esports', getConfig())) }; },
+    'cs-memes.query'(key, args, authorize, signal) {
+      authorize(); return csMemes.query(key, args, extensionConfig('esports', getConfig()), authorize, signal);
+    },
+    async 'esports.query'(key, args, authorize, signal) {
+      authorize();
+      if (!extensionEnabled('esports', getConfig())) fail('电竞插件已关闭', 403);
+      const result = await esports.query(args, extensionConfig('esports', getConfig()), authorize, signal);
+      authorize(); csMemes.noteMatch(key, result);
+      if (csMemes.liveCommentary(key)) result.commentary = {
+        refreshAfterMs: 20000,
+        diversity: csMemes.diversity(key),
+        instruction: '当前CS比赛解说要主动跟进：qq_wait_for_messages用timeoutMs=20000、minNewMessages=1、quietMs=3000；无人聊天也刷新该场比分和附带回合。每句话都带梗，包括报比分和回群友；可以为了串而串，CS解说期间可以完全不管人设。每条解说优先带一处可辨认的6657原梗或融梗，用qq_cs_meme_search/qq_cs_meme_hot取得候选，不能查完只发普通数据播报；余下可放开吐槽、抽象比喻和自创段子，比分/地图分/胜负仍说准，不拿段子冒充真实击杀。遵守diversity：最近10条中用过的梗、母题、句式先冷却，换人名/比分套原句仍算重复；四本书/大学/论语系列已用过就停，换题材和回合现编，候选陈旧就换公开主题或24h/7d窗口补新梗。已有新素材够用不必每句查库。出现新比分、关键击杀/残局或可串的角度就主动发言，不用等被问；数据没变化不重复刷屏，记住已讲过的事件id。比赛结束、用户停止或换话题即结束主动循环并恢复原人设；普通睡前5分钟观察只在决定收尾时使用。'
+      };
+      const live = result.matches?.filter(m => m.status === 'live');
+      if (args.game === 'cs2' && (args.mode == null || args.mode === 'live') && live?.length === 1
+          && csMemes.active(key, extensionConfig('esports', getConfig()))) {
+        const detail = await esports.query({ game: 'cs2', mode: 'events', matchId: live[0].id, eventLimit: 30, maxEventPages: 1 },
+          extensionConfig('esports', getConfig()), authorize, signal);
+        authorize();
+        if (!csMemes.active(key, extensionConfig('esports', getConfig()))) return result;
+        const enriched = detail.matches?.find(m => m.id === live[0].id);
+        if (enriched) {
+          result.matches = result.matches.map(m => m.id === enriched.id ? enriched : m);
+          result.commentaryEvents = { attempted: true, status: enriched.eventLog?.status,
+            note: '查比分顺带读取最近已核对回合，给娱乐解说找素材，不要求逐条播报；缺失或未结算不编造。自动附带最多1页，更多历史可显式events查询。' };
+        } else result.commentaryEvents = { attempted: true, status: 'unavailable', note: '回合读取失败，比分仍可用。' };
+      }
+      return result;
+    },
+    'ark.assist': (key, args, authorize, signal) => ark.handle(key, args, authorize, signal),
+    'ark.embed': (key, args, authorize, signal) => {
+      const scopeKey = key || args.scopeKey;
+      const recheck = () => {
+        authorize();
+        if (!scopeKey || !sessionAllowed(scopeKey) || getConfig().socialV2?.tools?.memory === false
+          || !backgroundAllowed() || String(args.botAccountId) !== String(getSelfId())) fail('向量记忆范围已撤销', 403);
+      };
+      recheck();
+      return ark.embedding(args.text, recheck, signal, key ? 2000 : 10000);
+    },
+    'ark.rank': (key, args, authorize, signal) => getConfig().extensions?.ark?.enabled === true
+      ? ark.rank(key, args, authorize, signal) : { candidates: args.candidates, provider: 'unchanged' },
     'memory.legacy'(key, _args, authorize) {
       authorize();
       const read = scope => getConfig().socialV2?.tools?.memory === false ? []
@@ -72,6 +142,7 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       const cfg = getConfig();
       const extra = extensionConfig('social-memory', cfg);
       return { botAccountId:String(getSelfId()||''),ownerQQ:String(cfg.ownerQQ||''),enabled:cfg.socialV2?.tools?.memory!==false,people: cfg.socialV2?.tools?.memory === false ? [] : [...new Set([...(cfg.allow?.private ?? []), ...(extra.people ?? []), cfg.ownerQQ].filter(Boolean).map(String))],
+        embeddingEnabled: cfg.extensions?.ark?.enabled === true && cfg.extensions.ark.config?.embeddingEnabled !== false,
         groups: (cfg.allow?.groups ?? []).map(String), minimumTiers: extra.minimumTiers ?? {} };
     },
     sendMessage(key, messages, requestId, authorize) {
@@ -87,22 +158,17 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
       authorize();
       if (!extensionEnabled('bilibili', getConfig())) fail('B站解析已关闭', 403);
       const media = extensionConfig('bilibili', getConfig());
+      if (getConfig().extensions?.ark?.enabled === true && !arkPaused(getConfig().extensions.ark.config)) media.ark = extensionConfig('ark', getConfig());
       const message = readMessage(key, options.messageId);
       if (!message) fail('视频消息不属于当前会话', 404);
-      const approvals = () => {
-        const st = getConversation(key);
-        return videoApproval(message, [...(st?.recentMessages ?? []), ...(st?.unread ?? [])],
-          extensionConfig('bilibili', getConfig()), options.approvalMessageId);
-      };
-      const approved = approvals();
       const refs = biliReferences(`${(message.sharedLinks ?? []).join('\n')}\n${message.text ?? ''}\n${message.plain ?? ''}\n${message.tail ?? ''}`);
       if (!refs.includes(reference)) fail('视频链接不属于当前消息', 403);
-      const result = await readVideo(reference, { ...options, media, stateDir, watchApproved: !!approved });
+      const result = await readVideo(reference, { ...options, media, stateDir, watchApproved: false });
       authorize();
       const current = videoPolicy(extensionConfig('bilibili', getConfig()));
-      const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current, !!approvals());
+      const blocked = result.watchStatus === 'skipped' ? result.reason : videoDurationReason(result, current);
       return blocked ? skippedVideo(blocked, current, result.totalDuration ?? result.duration, result)
-        : { ...result, watchAuthorization: approved ? 'explicit-approval' : 'duration-limit' };
+        : { ...result, watchAuthorization: !current.durationGateEnabled ? 'duration-gate-disabled' : 'duration-limit' };
     },
     'drive.inspect'(_key, { action, magnet }, authorize) {
       authorize();
@@ -126,6 +192,15 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     },
   } });
   async function handle({ req, url, readBody, sendJson }) {
+    if (url.pathname === '/api/memory-library/hybrid-status') {
+      if (req.headers['x-agent-token'] || req.headers['x-agent-call'] !== undefined) fail('向量索引状态仅管理员可用', 403);
+      if (req.method !== 'GET') { sendJson({ ok: false, error: '仅支持GET' }, 405); return true; }
+      sendJson(await host.invokeAdmin('social-memory', 'hybrid-status', {}, key => {
+        if (!extensionEnabled('social-memory', getConfig()) || getConfig().socialV2?.tools?.memory === false) fail('记忆已关闭', 403);
+        if (key && !sessionAllowed(key)) fail('会话已撤销', 403);
+      }));
+      return true;
+    }
     if (url.pathname === '/api/memory-library/review') {
       const authorize=key=>{
         if(req.headers['x-agent-token']||req.headers['x-agent-call']!==undefined)fail('记忆核实仅管理员可用',403);
@@ -170,6 +245,7 @@ export function createIntegrations({ stateDir, getConfig, onebot, getConversatio
     sendJson({ ok: false, error: '未知扩展功能' }, 404); return true;
   }
   handle.host = host;
+  handle.csCommentaryFor = key => extensionEnabled('esports', getConfig()) && csMemes.liveCommentary(key);
   handle.parseSocialEvents = parseSocialEvents;
   handle.recordSocialEvents = async (key, events, assertAuthorized) => {
     const receipts = [];

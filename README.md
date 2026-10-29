@@ -11,6 +11,9 @@
 | 项目插件 | 在本项目 `extensions/` 中扩展工具、消息事件、定时任务与存储，复用权限、超时、回执和幂等机制。 |
 | 媒体与空间 | 搜图与图片发送、B站视频读取、QQ 空间工具；默认视频整段门槛 180 秒，超长需真实消息许可，画面采样和转写范围明确标注。 |
 | 云端运行 | 支持低内存 Linux 部署、流式媒体下载、资源门槛及可选独立语音服务；本地开发可用 development-only 标记禁止生产启动。 |
+| 可选扩展 | CS / LOL 赛事查询、游戏状态工具、语音路由与本地图像生成扩展；需要分别配置服务及权限。 |
+
+LOL 赛事查询通过 `LOLESPORTS_WEB_API_KEY` 环境变量读取接口密钥，仓库不内置密钥。好友审批使用配置文件的 `ownerQQ`，管理员私聊及来源会话仍需获得白名单授权。公开代码不包含私人日记实现和个人角色资料。
 
 安装和开发见 [项目插件指南](docs/guides/PROJECT_PLUGINS.md)。记忆功能见 [记忆 1.6 使用说明](docs/guides/MEMORY_V16.md)与[管理员记忆库](docs/guides/MEMORY_LIBRARY.md)，媒体规则见 [视频参与说明](docs/guides/VIDEO_PARTICIPATION.md)，部署见 [低内存 Linux 指南](docs/guides/LINUX_LOW_MEMORY.md)。完整变更见 [CHANGELOG](CHANGELOG.md)，上游关系见 [UPSTREAM](UPSTREAM.md)。
 

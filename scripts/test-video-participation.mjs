@@ -4,23 +4,23 @@ import {bridgeHarness} from './audit-bridge-harness.mjs';
 import {planTimelineTimes,videoToolResult} from '../src/bilibili-media.js';
 import {transcribeSocket} from '../src/speech-socket.js';
 const bv='BV1xx411c7mD';
-test('视频独立唤醒：零概率、潜水、无需@、峰时均不能拦截；引用旧视频不触发',async()=>{
+test('视频不再独立唤醒，普通消息与引用遵循原有规则',async()=>{
  const h=await bridgeHarness({config:{socialV2:{peakEconomy:{enabled:true,mode:'peak',probability:0,minIntervalMs:900000}}}});
  try{
   h.setMode('reserved2');h.setSelfIdentity('fixture','10001');const st=h.getSocialV2State('group:456');st.bootstrapSent=true;
   st.wakeConfig={mode:'diving',infinite:true,triggers:{probability:0},batchWindowMs:8000};
   const incoming=message=>h.handleIncoming('group',456,{self_id:10001,user_id:123,group_id:456,message_id:'share',sender:{nickname:'fixture'},message},h.cfg);
   await incoming([{type:'text',data:{text:'https://www.bilibili.com/video/'+bv}}]);
-  assert(st.pendingWakeTimer,'B站分享必须计划唤醒');
+  assert.equal(!!st.pendingWakeTimer,false,'B站分享不单独唤醒');
   clearTimeout(st.pendingWakeTimer);st.pendingWakeTimer=null;
   await h.sendWakePromptV2('group:456','video');assert.equal(h.calls.prompts.length,1,'峰时仍投递视频唤醒');
   const prompt=h.calls.prompts[0].content.map(p=>p.text||'').join('\n');
-  assert.match(prompt,/视频分享必唤醒/);assert.match(prompt,/180秒/);assert.doesNotMatch(prompt,/≤5分钟/);
-  assert.match(prompt,/没看视频，只看标题/);assert.match(prompt,/全时间线/);assert.match(prompt,/画面采样/);
+  assert.match(prompt,/视频分享不单独触发唤醒/);assert.match(prompt,/180秒/);assert.doesNotMatch(prompt,/≤5分钟/);
+  assert.match(prompt,/不观看、不点评/);assert.match(prompt,/全时间线/);assert.match(prompt,/画面采样/);
  }finally{await h.close();}
  for(const [label,message,wake]of [
-  ['native',[{type:'video',data:{file:'fixture.mp4'}}],true],
-  ['card',[{type:'json',data:{data:JSON.stringify({meta:{detail_1:{title:'fixture',qqdocurl:'https://b23.tv/fixture'}}})}}],true],
+  ['native',[{type:'video',data:{file:'fixture.mp4'}}],false],
+  ['card',[{type:'json',data:{data:JSON.stringify({meta:{detail_1:{title:'fixture',qqdocurl:'https://b23.tv/fixture'}}})}}],false],
   ['ordinary',[{type:'text',data:{text:'普通聊天'}}],false],
   ['quoted',[{type:'reply',data:{id:'old-video'}},{type:'text',data:{text:'之前那个'}}],false]
  ]){

@@ -9,6 +9,8 @@
     "memory.context",
     "memory.policy",
     "memory.legacy",
+    "ark.rank",
+    "ark.embed",
     "scheduler",
     "admin.local"
   ],

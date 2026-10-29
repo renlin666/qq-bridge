@@ -9,7 +9,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "test": "node --test scripts/test-cost-guard.mjs scripts/test-peak-economy.mjs scripts/test-project-plugins.mjs scripts/test-release-workflow.mjs scripts/test-integrations.mjs scripts/test-bilibili-media.mjs scripts/test-media-stream.mjs scripts/test-social-extensions.mjs scripts/test-qzone-friends.mjs scripts/test-image-search.mjs scripts/test-contact-delivery.mjs scripts/test-native-memory-policy.mjs scripts/test-output-continuation.mjs scripts/test-exclusive-model.mjs scripts/test-video-policy.mjs scripts/test-social-memory-plugin.mjs scripts/test-memory-capture.mjs scripts/test-memory-retrieval-v16.mjs scripts/test-phone-memory.mjs scripts/test-friend-approval.mjs scripts/test-social-stages.mjs lib/social-memory/test/*.test.js lib/social-memory/review/regression-probes.mjs",
+    "test": "node --test scripts/test-comfy.mjs scripts/test-cs-memes.mjs scripts/test-esports.mjs scripts/test-cost-guard.mjs scripts/test-peak-economy.mjs scripts/test-conversation-followup.mjs scripts/test-project-plugins.mjs scripts/test-release-workflow.mjs scripts/test-integrations.mjs scripts/test-bilibili-media.mjs scripts/test-media-stream.mjs scripts/test-social-extensions.mjs scripts/test-qzone-friends.mjs scripts/test-image-search.mjs scripts/test-contact-delivery.mjs scripts/test-native-memory-policy.mjs scripts/test-output-continuation.mjs scripts/test-exclusive-model.mjs scripts/test-video-policy.mjs scripts/test-social-memory-plugin.mjs scripts/test-memory-capture.mjs scripts/test-memory-retrieval-v16.mjs scripts/test-social-stages.mjs lib/social-memory/test/*.test.js lib/social-memory/review/regression-probes.mjs scripts/test-hybrid-memory.mjs scripts/test-restart-recovery.mjs scripts/test-linked-history.mjs scripts/test-ark-assistant.mjs scripts/test-speech-router.mjs scripts/test-context-economy.mjs scripts/test-context-cost.mjs scripts/test-sts2-service.mjs scripts/test-sts2-action-state.mjs scripts/test-conversation-sessions.mjs",
     "test:extensions": "node --test scripts/test-project-plugins.mjs",
     "test:friends": "node --test scripts/test-friend-approval.mjs scripts/test-qzone-friends.mjs",
     "release:check": "node scripts/release-check.mjs",
@@ -71,7 +71,11 @@
     "test:routing-search": "node --test scripts/test-routing-search.mjs",
     "test:contact-delivery": "node --test scripts/test-contact-delivery.mjs",
     "test:image-search": "node --test scripts/test-image-search.mjs",
-    "test:native-memory": "node --test scripts/test-native-memory-policy.mjs"
+    "test:native-memory": "node --test scripts/test-native-memory-policy.mjs",
+    "test:esports": "node --test scripts/test-esports.mjs",
+    "test:sts2": "node --test scripts/test-sts2-service.mjs scripts/test-sts2-action-state.mjs scripts/test-conversation-sessions.mjs",
+    "test:context": "node --test scripts/test-context-economy.mjs scripts/test-context-cost.mjs",
+    "test:comfy": "node --test scripts/test-comfy.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-host-apiproxy": "0.1.1-rc.2",
@@ -80,6 +84,7 @@
     "@snowluma/mcp": "^1.14.20",
     "@snowluma/sdk": "^1.14.20",
     "js-yaml": "^4.3.2",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "ws": "8.22.0"
   }
 }

@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createSocialHub } from '../src/social-hub.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { registerIntegrationTools } from '../src/mcp-qq-integrations.js';
+import { readCostDelivery } from '../src/qq-cost-deliveries.js';
 
 const source = 'private:12345', target = 'private:23456';
 const body = { targetKey: target, messages: ['测试文本'], stickerIds: ['picture'], requestId: 'delivery_test_01' };
@@ -104,10 +106,11 @@ test('corrupt delivery ledger fails closed without a network write', async t => 
   assert.equal(f.calls.length, 0);
 });
 
-async function realBridge(t, globals = {}, extra = {}) {
+async function realBridge(t, globals = {}, extra = {}, config = {}) {
   const h = await bridgeHarness({ config: { ownerQQ: 12345, allow: { private: ['12345', '23456'], groups: [] },
-    socialV2: { sharedMemory: { enabled: true, handoffEnabled: true, allowedKeys: [source, target] }, ...extra } }, globals,
-    files: { 'state/stickers.json': [{ id: 'fixture-sticker', url: 'https://public.invalid/sticker', desc: '模拟图片' }] } });
+    socialV2: { sharedMemory: { enabled: true, handoffEnabled: true, allowedKeys: [source, target] }, tools: { sendVoice: true }, ...extra }, ...config }, globals,
+    files: { 'state/stickers.json': [{ id: 'fixture-sticker', url: 'https://public.invalid/sticker', desc: '模拟图片' }],
+      'audio/ark-fixture.silk': '#!SILK_V3-fixture-only' } });
   h.setMode('reserved2'); h.setSelfIdentity('测试机器人', '99999');
   const token = h.getSocialV2State(source).agentToken;
   const server = h.startConsoleServer(); if (!server.listening) await new Promise(resolve => server.once('listening', resolve));
@@ -120,6 +123,114 @@ async function realBridge(t, globals = {}, extra = {}) {
   };
   return { h, post };
 }
+
+const voiceBody = { targetKey: target, voice: 'ark-fixture.silk', requestId: 'voice_delivery_01' };
+const voiceConfig = { voice: { enabled: true } };
+
+test('contact tool schema passes voice with the source token and a long enough timeout', async () => {
+  const tools = new Map(); let call;
+  registerIntegrationTools({ tool: (name, description, schema, fn) => tools.set(name, { description, schema, fn }) },
+    async (url, options) => { call = { url, ...options }; return { sent: true }; }, {});
+  const tool = tools.get('qq_send_to_contact');
+  assert.equal(tool.schema.voice.parse('ark-fixture.silk'), voiceBody.voice);
+  await tool.fn({ key: source, token: 'source-only', ...voiceBody });
+  assert.equal(call.headers['x-agent-token'], 'source-only');
+  assert.equal(JSON.parse(call.body).voice, voiceBody.voice);
+  assert.equal(JSON.parse(call.body).key, source);
+  assert.equal(call.timeoutMs, 300000);
+});
+
+test('cross-window voice sends a record to the target, verifies it, bills the source and cannot duplicate', async t => {
+  const { h, post } = await realBridge(t, {}, voiceConfig, { costControl: { enabled: true } });
+  h.state.sessions[source] = 'voice-source-session';
+  h.state.sessions[target] = 'voice-target-session';
+  const result = await post(voiceBody);
+  assert.equal(result.status, 200); assert.equal(result.data.sent, true); assert.equal(result.data.verified, true);
+  assert.equal(result.data.receipts[0].type, 'voice');
+  assert.equal(result.data.receipts[0].messageId, '9001');
+  assert.equal(h.calls.http[0].body.user_id, 23456);
+  assert.equal(h.calls.http[0].body.message[0].type, 'record');
+  assert.match(h.calls.http[0].body.message[0].data.file, /^base64:\/\//);
+  assert.match(h.calls.http[1].url, /get_msg$/);
+  assert.equal(h.calls.prompts.length, 0);
+  assert.equal(h.getSocialV2State(target).recentMessages.length, 1);
+  assert.equal(h.getSocialV2State(target).recentMessages[0].messageId, '9001');
+  assert.equal(readCostDelivery(h.temp, 'voice-source-session').targetKey, target);
+  assert.equal(readCostDelivery(h.temp, 'voice-target-session'), null);
+  assert.equal((await post(voiceBody)).data.duplicate, true);
+  assert.equal(h.calls.http.length, 2);
+  assert.equal((await post({ ...voiceBody, voice: 'different.silk' })).status, 409);
+});
+
+test('voice without readback confirmation stays uncertain and retries never resend it', async t => {
+  let writes = 0;
+  const { post } = await realBridge(t, { fetch: async url => {
+    if (!String(url).endsWith('get_msg')) writes++;
+    return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: { message_id: 12345, message: [] } }) };
+  } }, voiceConfig);
+  const result = await post(voiceBody);
+  assert.equal(result.data.sent, false); assert.equal(result.data.verified, false);
+  assert.equal(result.data.status, 'uncertain'); assert.equal(result.data.receipts[0].messageId, '12345');
+  assert.equal((await post(voiceBody)).data.duplicate, true); assert.equal(writes, 1);
+});
+
+test('voice with no gateway receipt stays uncertain and cannot reset the source budget checkpoint', async t => {
+  let writes = 0;
+  const { h, post } = await realBridge(t, { fetch: async () => {
+    writes++; return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: {} }) };
+  } }, voiceConfig, { costControl: { enabled: true } });
+  h.state.sessions[source] = 'missing-receipt';
+  const result = await post(voiceBody);
+  assert.equal(result.data.sent, false); assert.equal(result.data.status, 'uncertain');
+  assert.equal(result.data.receipts.length, 0); assert.equal(readCostDelivery(h.temp, 'missing-receipt'), null);
+  assert.equal(h.getSocialV2State(target).recentMessages.length, 0);
+  await post(voiceBody); assert.equal(writes, 1);
+});
+
+test('cross-window voice enforces the voice switches and library confinement before sending', async t => {
+  for (const extra of [{ voice: { enabled: false } }, { ...voiceConfig, tools: { sendVoice: false } }]) {
+    const { h, post } = await realBridge(t, {}, extra);
+    assert.equal((await post(voiceBody)).status, 403); assert.equal(h.calls.http.length, 0);
+  }
+  const { h, post } = await realBridge(t, {}, voiceConfig);
+  for (const voice of ['../secret.mp3', 'https://example.com/voice.mp3', 'base64://YWJj', 'missing.silk', '']) {
+    assert.notEqual((await post({ ...voiceBody, voice })).status, 200);
+  }
+  assert.equal(h.calls.http.length, 0);
+});
+
+test('source token rotation, target grant revocation and voice disable during preparation cancel the queued write', async t => {
+  for (const revoke of [h => { h.getSocialV2State(source).agentToken = 'rotated'; },
+    h => { h.cfg.socialV2.sharedMemory.allowedKeys = [source]; },
+    h => { h.cfg.socialV2.tools.sendVoice = false; }]) {
+    let bridge;
+    const { h, post } = await realBridge(t, { processAudioVolume: async file => {
+      revoke(bridge); return { path: file, converted: false };
+    } }, voiceConfig);
+    bridge = h;
+    const result = await post(voiceBody);
+    assert.equal(result.data.sent === true, false); assert.equal(h.calls.http.length, 0);
+  }
+});
+
+test('voice quota is shared with both endpoints and serial queue checks block concurrent overflow', async t => {
+  const { h, post } = await realBridge(t, {}, { voice: { enabled: true, maxPerMinute: 1, maxPerHour: 10 } });
+  const results = await Promise.all([post(voiceBody), post({ ...voiceBody, requestId: 'voice_delivery_02' })]);
+  assert.equal(results.filter(r => r.data.sent).length, 1);
+  assert.equal(h.calls.http.filter(r => /send_private_msg$/.test(r.url)).length, 1);
+  assert.throws(() => h.voiceBudgetCheck(source, h.voiceCfg()), /频率/);
+  assert.throws(() => h.voiceBudgetCheck(target, h.voiceCfg()), /频率/);
+});
+
+test('a text plus voice partial delivery preserves the text receipt and cannot duplicate on retry', async t => {
+  const { h, post } = await realBridge(t, {}, { voice: { enabled: true, maxBytes: 1 } });
+  const payload = { ...voiceBody, messages: ['先发文字'] };
+  const result = await post(payload);
+  assert.equal(result.data.sent, false); assert.equal(result.data.status, 'partial');
+  assert.equal(result.data.receipts[0].type, 'text');
+  assert.equal((await post(payload)).data.duplicate, true);
+  assert.equal(h.calls.http.length, 1);
+});
 
 test('real bridge source-token route sends to correct target without a target agent turn', async t => {
   const { h, post } = await realBridge(t);

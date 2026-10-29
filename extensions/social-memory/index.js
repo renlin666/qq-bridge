@@ -8,6 +8,7 @@ import { createSocialPolicy, explicitPreference, POLICY_KINDS } from './social-p
 import { createAutoCapture, extractSelfStatements } from './auto-capture.js';
 import { contentKey } from '../../lib/social-memory/src/search.js';
 import { SENSITIVE_RE } from '../../src/sensitive.js';
+import { HybridMemoryIndex } from './hybrid-index.js';
 
 export async function activate(ctx) {
   const policy = createWhitelistPolicy();
@@ -16,6 +17,7 @@ export async function activate(ctx) {
   const reactions = createReactions(ctx.storage);
   const socialPolicy = createSocialPolicy(path.join(ctx.dataDirectory, 'social-policy.db'));
   const capture = createAutoCapture(path.join(ctx.dataDirectory, 'capture.db'));
+  const hybrid = new HybridMemoryIndex(path.join(ctx.dataDirectory, 'vector-index-qwen3-embedding-0.6b.db'));
   let minimumTiers = {};
   const service = createSocialMemory({ dbPath: path.join(ctx.dataDirectory, 'memory.db'), policy, adapter,
     relationshipStages: true,
@@ -38,12 +40,16 @@ export async function activate(ctx) {
     const trusted={platform:row.platform,botAccountId:row.bot_account_id,actor:{userId:row.user_id,displayName:name},
       conversation:{kind:row.scope_type,id:row.scope_id,...(row.scope_type==='group'?{groupId:row.scope_id.slice(6)}:{})}};
     const result=service.reviewMemory(trusted,row.id,{...args,reviewer:roster.ownerQQ||'console-administrator'});
+    if (embeddingEnabled) hybrid.sync(trusted, documentsFor(trusted));
     const sync=await service.syncOutbox();
     return {ok:true,memoryId:row.id,version:result.memory.version,status:result.memory.status,reviewId:result.reviewId,duplicate:result.duplicate,syncPending:sync.pending};
   });
   let currentBot = '';
+  let embeddingEnabled = false;
   async function refreshPolicy(bot = currentBot) {
     const roster = await ctx.background('memory.policy');
+    bot = String(roster.botAccountId || bot || '');
+    embeddingEnabled = roster.embeddingEnabled === true;
     minimumTiers = roster.minimumTiers ?? {};
     policy.replace({ bots: bot ? { [bot]: { people: [...roster.people,...(ctx.config.captureGroupSpeakers===true&&roster.enabled!==false?capture.people(bot,roster.groups):[])], groups: roster.groups } } : {} });
     currentBot = bot;
@@ -92,6 +98,60 @@ export async function activate(ctx) {
     }
     return [...fresh, ...(topic ? [] : old.filter(index => !transferred.has(index.memoryId)))];
   }
+  function documentsFor(trusted, topic = '') {
+    let fresh = [];
+    try { fresh = service.retrievalDocuments(trusted, { topic, observations: true }); }
+    catch (error) { if (!['FORBIDDEN', 'PERSON_DISABLED'].includes(error.code)) throw error; }
+    const transferred = new Set(migrationDb.prepare(`SELECT source_message_id FROM memories
+      WHERE bot_account_id=? AND scope_id=? AND source_message_id LIKE 'legacy-note:%'
+        AND (status='forgotten' OR (status='active' AND confirmed=1 AND (valid_to IS NULL OR valid_to>?)))`)
+      .all(String(trusted.botAccountId), trusted.conversation.id, Date.now())
+      .map(row => legacyMemoryId(String(trusted.botAccountId), trusted.conversation.id, 'legacy-shared', row.source_message_id.slice(12))));
+    return [...fresh, ...(topic ? [] : legacy.documents(String(trusted.botAccountId), trusted.conversation.id)
+      .filter(d => !transferred.has(d.memoryId)))];
+  }
+  const trustedFor = (message, key) => ({ platform: 'qq', botAccountId: String(message.botAccountId),
+    actor: { userId: String(message.userId), displayName: message.sender || String(message.userId) },
+    conversation: { kind: key.startsWith('group:') ? 'group' : 'private', id: key, ...(key.startsWith('group:') ? { groupId: key.slice(6) } : {}) } });
+  async function hybridQuery(message, call, query, lexical, topic = '') {
+    const trusted = trustedFor(message, call.key);
+    if (!embeddingEnabled) return { indexes: lexical, rankingProvider: 'keyword', indexingPending: 0 };
+    const all = documentsFor(trusted), documents = topic ? documentsFor(trusted, topic) : all;
+    hybrid.sync(trusted, all);
+    const original = new Map(documents.map(d => [d.memoryId, d.text]));
+    const ranked = await hybrid.query(trusted, query, documents, lexical,
+      text => call.service('ark.embed', { text, botAccountId: trusted.botAccountId }), { complete: false });
+    await refreshPolicy(trusted.botAccountId); call.assertAuthorized();
+    if (!embeddingEnabled) return { indexes: [], rankingProvider: 'keyword', semanticUnavailable: true };
+    const current = new Map(documentsFor(trusted, topic).map(d => [d.memoryId, d]));
+    ranked.indexes = ranked.indexes.filter(row => current.get(row.memoryId)?.text === original.get(row.memoryId))
+      .map(row => ({ ...current.get(row.memoryId).index, retrievalSources: row.retrievalSources,
+        ...(row.semanticScore === undefined ? {} : { semanticScore: row.semanticScore }) }));
+    return ranked;
+  }
+  async function refreshVectorScopes() {
+    const roster = await refreshPolicy();
+    if (!roster.botAccountId || roster.enabled === false || !embeddingEnabled) return;
+    const rows = migrationDb.prepare(`SELECT DISTINCT m.bot_account_id,m.scope_id,m.scope_type,p.user_id
+      FROM memories m JOIN people p ON p.id=COALESCE(m.subject_person_id,
+        (SELECT author_person_id FROM memory_sources WHERE memory_id=m.id LIMIT 1))
+      WHERE m.bot_account_id=?`).all(roster.botAccountId);
+    for (const row of rows) {
+      const trusted = trustedFor({ botAccountId: row.bot_account_id, userId: row.user_id }, row.scope_id);
+      try { service.getRelationship(trusted); hybrid.sync(trusted, documentsFor(trusted)); }
+      catch (error) { if (!['FORBIDDEN', 'PERSON_DISABLED'].includes(error.code)) throw error; }
+    }
+  }
+  async function drainVectors() {
+    await hybrid.drain((text, trusted) => ctx.background('ark.embed', {
+      text, scopeKey: trusted.conversation.id, botAccountId: trusted.botAccountId
+    }), async (trusted, id, digest) => {
+      const roster = await refreshPolicy(trusted.botAccountId);
+      if (roster.enabled === false || !embeddingEnabled || String(roster.botAccountId) !== String(trusted.botAccountId)) return false;
+      const doc = documentsFor(trusted).find(d => d.memoryId === id);
+      return !!doc && hybrid.validHash(doc.text, digest);
+    });
+  }
   ctx.events.on('message', async (message, call) => {
     let trusted = null;
     try {
@@ -112,6 +172,7 @@ export async function activate(ctx) {
       try { await capture.process(message, call, service, trusted); }
       catch (error) { ctx.log('自动记忆采集失败', error.message); }
     }
+    if (trusted && embeddingEnabled) hybrid.sync(trusted, documentsFor(trusted));
   });
   ctx.context.register(async (message, call) => {
     const query = message.query || '';
@@ -124,7 +185,11 @@ export async function activate(ctx) {
     if (pack?.personId) Object.assign(hints, socialPolicy.compile(String(message.botAccountId), call.key,
       String(message.userId), pack.attitude, reaction));
     // Upstream receives only references/keywords. Bodies require a scoped read.
-    const indexes = message.attitudeOnly ? [] : await indexesFor(pack, old, message, call, query);
+    let indexes = message.attitudeOnly ? [] : await indexesFor(pack, old, message, call, query);
+    if (!message.attitudeOnly && /记得|记不记|以前|上次|之前|提过|说过|还记|想起来/.test(query)) {
+      const result = await hybridQuery(message, call, query, indexes);
+      call.assertAuthorized(); indexes = result.indexes;
+    }
     for (const index of indexes) {
       const entry = { memoryId: index.memoryId, keywords: index.keywords.slice(0, 6),
         ...(index.evidenceLevel ? {evidenceLevel:index.evidenceLevel,confirmed:index.confirmed,topics:index.topics} : {}),
@@ -138,7 +203,10 @@ export async function activate(ctx) {
     const message = call.messages.get(args.messageId);
     const old = await legacyFor(message, call, args.query || '');
     const pack = await optionalPack(message, call, args.query || '', 1200);
-    return { indexes: await indexesFor(pack, old, message, call, args.query || '',args.topic||''),
+    const indexes = await indexesFor(pack, old, message, call, args.query || '',args.topic||'');
+    const ranked = await hybridQuery(message, call, args.query || '', indexes, args.topic || '');
+    call.assertAuthorized();
+    return { ...ranked,
       note: '这里只返回关键词索引；正文按需调用 qq_social_memory_read。observation是待核实观察，不是事实或关系评分依据。' };
   });
   ctx.tools.register('qq_social_memory_profile', async (args,call)=>{
@@ -173,6 +241,7 @@ export async function activate(ctx) {
       quote:supported?.evidence||args.evidence||quote, origin: 'qq-agent', confidence: confirmed ? 0.9 : 0.5,deduplicate:true,
       occurredAt:Number(message.time)||Date.now(),
       ...(!confirmed ? {validForMs:30*86400000} : /最近|目前|现在|正在|准备|在学/.test(args.content)?{validForMs:90*86400000}:{}) });
+    if (embeddingEnabled) hybrid.sync(trusted, documentsFor(trusted));
     await service.syncOutbox();
     call.assertAuthorized();
     return {...result,...(args.confirmed&&!confirmed?{confirmationDowngraded:true,note:'原消息未通过明确本人自述校验，已保存为待核实；改写和复杂事实可由管理员核实。'}:{})};
@@ -181,6 +250,7 @@ export async function activate(ctx) {
     if (args.memoryId.startsWith('legacy:')) throw new Error('旧记忆请用 qq_memory_remove / qq_shared_memory_remove 删除原记录；索引会随源记录同步移除。');
     const { trusted } = await bound(args, call);
     const result = service.forgetMemory(trusted, args.memoryId);
+    hybrid.sync(trusted, documentsFor(trusted));
     await service.syncOutbox();
     call.assertAuthorized();
     return result;
@@ -219,6 +289,13 @@ export async function activate(ctx) {
     await refreshPolicy(); await service.syncOutbox();
     const archive = await ctx.background('memory.legacy');
     if (archive.botAccountId) for (const scope of archive.scopes) legacy.sync(archive.botAccountId, scope.key, scope.entries);
+    await refreshVectorScopes();
   });
-  ctx.onDispose(() => { migrationDb.close(); service.close(); adapter.close(); legacy.close(); socialPolicy.close(); capture.close(); });
+  ctx.scheduler.every(2000, drainVectors, { timeoutMs: 30000 });
+  ctx.admin.register('hybrid-status', async (_args, call) => {
+    call.assertAuthorized(); await refreshVectorScopes();
+    return { ...hybrid.stats, pending: hybrid.pending.size,
+      indexed: hybrid.db.prepare('SELECT count(*) AS n FROM embeddings WHERE vector IS NOT NULL').get().n };
+  });
+  ctx.onDispose(() => { hybrid.close(); migrationDb.close(); service.close(); adapter.close(); legacy.close(); socialPolicy.close(); capture.close(); });
 }

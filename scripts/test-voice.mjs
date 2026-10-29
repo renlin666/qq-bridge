@@ -199,9 +199,9 @@ console.log('## preset 人设已描述语音能力（否则 AI 不知道自己�
 {
   const preset = fs.readFileSync(path.join(ROOT, 'dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'), 'utf8');
   ok(preset.includes('qq_send_voice'), 'qq-chat-v2 人设提到 qq_send_voice');
-  ok(preset.includes('qq_list_voices'), 'qq-chat-v2 人设提到 qq_list_voices');
+  ok(preset.includes('qq_synthesize_speech') || preset.includes('qq_list_voices'), 'qq-chat-v2 人设说明实时生成或查询语音来源');
   ok(preset.includes('verified=true'), '人设说明 verified=true 的语义');
-  ok(/不要假装发了语音/.test(preset), '人设禁止假装发语音');
+  ok(/不要假装发了语音|生成不等于发送/.test(preset), '人设区分语音生成与实际发送');
   // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
   // （dsh/agent-presets/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
   const restrict = fs.readFileSync(path.join(ROOT, 'plugins', 'qq-agent-presets', 'qq-tool-restrict.mjs'), 'utf8');

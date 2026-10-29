@@ -123,15 +123,16 @@ export function createPluginHost({ root, stateDir, getConfig, services = {}, log
         if (!TOOL_RE.test(name) || row.commands.has(name) || typeof handler !== 'function') fail('命令名称无效或重复');
         row.commands.set(name, { handler, allowMembers: allowMembers === true });
       } }),
-      scheduler: Object.freeze({ every(ms, handler) {
+      scheduler: Object.freeze({ every(ms, handler, { timeoutMs = hookTimeoutMs } = {}) {
         registering();
         if (!Number.isInteger(ms) || ms < 1000 || typeof handler !== 'function' || !row.manifest.capabilities.includes('scheduler')) fail('定时任务未授权或间隔无效');
+        if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) fail('定时任务超时应为1～120000毫秒');
         let running = false;
         const timer = setInterval(async () => {
           if (running || row.status !== 'active' || !extensionEnabled(row.id, getConfig())) return;
           running = true;
           let work;
-          try { await deadline(row, hookTimeoutMs, signal => {
+          try { await deadline(row, timeoutMs, signal => {
             work = Promise.resolve().then(() => handler({ signal }));
             work.then(() => { running = false; }, () => { running = false; });
             return work;

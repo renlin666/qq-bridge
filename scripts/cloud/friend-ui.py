@@ -50,21 +50,20 @@ def onebot(action):
  if out.get('retcode')!=0 or out.get('status')!='ok':raise RuntimeError('OneBot read failed')
  return out.get('data')
 def approval(ident):
- c=json.loads((STACK/'config.json').read_text())
- ADMIN=str(c.get('ownerQQ',''))
- if not re.fullmatch(r'[1-9][0-9]{4,11}',ADMIN):raise ValueError('administrator is not configured')
  if not re.fullmatch('[a-f0-9]{16}',ident):raise ValueError('invalid request id')
+ c=json.loads((STACK/'config.json').read_text());admin=str(c.get('ownerQQ',''))
+ if not re.fullmatch(r'[1-9][0-9]{4,11}',admin):raise ValueError('invalid administrator')
  rows=json.loads((STACK/'state/friend-requests.json').read_text())['requests']
  row=next(r for r in rows if r['id']==ident)
- if row['status']!='dispatching' or row.get('approvedBy')!=ADMIN or row.get('approvalKey')!='private:'+ADMIN or not row.get('approvalMessageId'):
+ if row['status']!='dispatching' or row.get('approvedBy')!=admin or row.get('approvalKey')!='private:'+admin or not row.get('approvalMessageId'):
   raise ValueError('missing private administrator approval')
  if not 0<=time.time()*1000-row['approvalAt']<=DAY:raise ValueError('approval expired')
- c=json.loads((STACK/'config.json').read_text());q={**c.get('integrations',{}).get('qzone',{}),**c.get('extensions',{}).get('qzone',{}).get('config',{})}
+ q={**c.get('integrations',{}).get('qzone',{}),**c.get('extensions',{}).get('qzone',{}).get('config',{})}
  mode=json.loads((STACK/'state/mode.json').read_text()).get('mode')
  social=json.loads((STACK/'state/social-v2.json').read_text())
  if mode!='reserved2' or c.get('socialV2',{}).get('enabled') is False or social.get('paused'):raise ValueError('QQ agent paused or mode changed')
  if c.get('extensions',{}).get('qzone',{}).get('enabled') is False or not q.get('enabled') or not q.get('friendsEnabled') or row['key'] not in q.get('allowedKeys',[]):raise ValueError('feature permission revoked')
- for target in [row['key'],'private:'+ADMIN]:
+ for target in [row['key'],'private:'+admin]:
   kind,uin=target.split(':');field='groups' if kind=='group' else 'private'
   if uin in list(map(str,c.get('deny',{}).get(field,[]))) or uin not in list(map(str,c.get('allow',{}).get(field,[]))):raise ValueError('conversation permission revoked')
  if str(onebot('get_login_info')['user_id'])!=row['accountId']:raise ValueError('logged in account changed')

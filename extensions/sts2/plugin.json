@@ -1,0 +1,148 @@
+{
+  "id": "sts2",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "entry": "./index.js",
+  "capabilities": [
+    "games.sts2"
+  ],
+  "tools": [
+    {
+      "name": "qq_sts2_read",
+      "description": "仅管理员本人私聊：读取本机杀戮尖塔2真实局面、菜单请求、地图、可达节点或药水；不是桌面控制。先读取health和state，开局只能request/respond；不能调用/start。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "enum": [
+              "health",
+              "state",
+              "request",
+              "map",
+              "next",
+              "potions"
+            ]
+          }
+        },
+        "required": [
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "timeoutMs": 30000
+    },
+    {
+      "name": "qq_sts2_control",
+      "description": "仅管理员本人私聊：根据最近15分钟内真实发送的玩杀戮尖塔2请求，启用最长2小时游戏控制；暂停或停止时enabled=false。requestMessageId必须属于当前管理员私聊。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "requestMessageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "requestMessageId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "qq_sts2_action",
+      "description": "仅管理员授权有效时操作杀戮尖塔2；每次使用唯一requestId，超时后先读状态，原编号查询不重复执行。成功动作自动附执行后的state和nextRequest；stateStatus=stable且stateReadRequired=false时直接据此继续，无需重复读state/request。pending/unavailable先读状态，stopped停止操作；duplicate/cached仅是旧动作回执，不能当当前状态。respond的arguments.id用动作结果的nextRequest.id，或read(request)返回的pending.id；arguments.picks填候选key数组。缺少id时服务会重新读取当前请求并核对候选，不能凭猜测提交。先处理奖励/选项，再用proceed且arguments={}点击房间的前进/继续按钮，商店面板先用respond关闭，不跳过未处理奖励；move只用next给出的可达节点。不能执行命令、操作桌面、改存档或退出/重载游戏。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "play_card",
+              "end_turn",
+              "move",
+              "respond",
+              "proceed",
+              "use_potion",
+              "discard_potion"
+            ]
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "integer"
+              },
+              "target": {
+                "type": "integer"
+              },
+              "player": {
+                "type": "integer"
+              },
+              "col": {
+                "type": "integer"
+              },
+              "row": {
+                "type": "integer"
+              },
+              "confirm": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "picks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "potion": {
+                "type": "string"
+              },
+              "index": {
+                "type": "integer"
+              },
+              "card": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "kind",
+          "requestId",
+          "arguments"
+        ],
+        "additionalProperties": false
+      },
+      "timeoutMs": 65000
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "tokenFile": {
+        "type": "string"
+      },
+      "enabled": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": false
+  }
+}

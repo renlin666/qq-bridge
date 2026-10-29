@@ -7,6 +7,7 @@ import { readBilibili } from './bilibili.js';
 import { safeFetch, safeFetchMedia, safeFetchMediaToFile } from './safe-fetch.js';
 import { videoPolicy, videoDurationReason, skippedVideo } from './video-watch-policy.js';
 import { transcribeSocket } from './speech-socket.js';
+import { transcribeArk } from './ark-client.js';
 
 export function planFrameTimes(duration, { startSeconds = 0, endSeconds = duration, frameCount = 16 } = {}) {
   const start = Number(startSeconds), end = Math.min(Number(endSeconds), duration);
@@ -40,12 +41,13 @@ function run(file, args, timeoutMs = 30000) {
       clearTimeout(timer);
       if (expired) reject(new Error('本地媒体处理超时'));
       else if (code !== 0) reject(new Error('本地媒体处理失败：' + stderr.slice(-400)));
-      else resolve(stdout);
+      else resolve({ stdout, stderr });
     });
   });
 }
 
 async function transcribeLocal(wav, media) {
+  if (media.ark) return transcribeArk(await fs.readFile(wav), media.ark);
   if (media.speechSocketPath) return transcribeSocket(await fs.readFile(wav), media.speechSocketPath);
   const token = randomBytes(32).toString('hex');
   const modelDir = path.resolve(media.modelDirectory);
@@ -131,10 +133,22 @@ export function planTimelineTimes(duration) {
   return times;
 }
 
+export async function probeVideoDuration(file, ffmpegPath) {
+  // Inspect the downloaded track, whose duration can be shorter than the public
+  // page's rounded duration. Copying zero seconds avoids decoding the video.
+  const { stderr } = await run(ffmpegPath, ['-nostdin', '-hide_banner', '-loglevel', 'info',
+    '-threads', '1', '-protocol_whitelist', 'file,pipe', '-i', file, '-map', '0:v:0',
+    '-c', 'copy', '-t', '0', '-f', 'null', '-']);
+  const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  const seconds = match && Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  if (!(seconds > 0)) throw new Error('无法读取本地视频轨的实际时长');
+  return seconds;
+}
+
 export async function timelineSheets(file,dir,times,ffmpegPath) {
   // Each invocation holds only one 480p frame or one contact sheet in memory.
   // Contact sheets preserve temporal order without flooding the model with 90 images.
-  const tag='timeline-v1-',base=['-nostdin','-hide_banner','-loglevel','error','-y','-threads','1','-filter_threads','1'];
+  const tag='timeline-v2-',base=['-nostdin','-hide_banner','-loglevel','error','-y','-threads','1','-filter_threads','1'];
   for(let i=0;i<times.length;i++){
     const jpg=path.join(dir,`${tag}${String(i).padStart(3,'0')}.jpg`);
     try{await fs.access(jpg);}catch{
@@ -142,6 +156,7 @@ export async function timelineSheets(file,dir,times,ffmpegPath) {
       await run(ffmpegPath,[...base,'-ss',String(times[i]),'-protocol_whitelist','file,pipe','-i',file,'-frames:v','1',
         '-vf',`scale=320:180:force_original_aspect_ratio=decrease,pad=320:202:(ow-iw)/2:0:color=0xeeeade,drawtext=font=monospace:text='${text}':x=6:y=183:fontsize=14:fontcolor=0x222222`,'-q:v','3',jpg]);
     }
+    if (!(await fs.stat(jpg).catch(() => null))?.size) throw new Error(`视频在 ${times[i]} 秒未生成有效画面`);
   }
   const total=Math.ceil(times.length/16),pattern=path.join(dir,tag+'sheet-%02d.jpg');
   await run(ffmpegPath,[...base,'-framerate','1','-start_number','0','-i',path.join(dir,tag+'%03d.jpg'),
@@ -192,12 +207,12 @@ async function readMedia(reference, options = {}) {
   const media = options.media ?? {};
   const lowMemory = media.lowMemory === true;
   const policy = videoPolicy(media);
-  const video = await readBilibili(reference, { ...options, maxVideoSeconds: options.watchApproved === true ? undefined : policy.maxVideoSeconds, maxTextChars: policy.maxTextChars });
+  const video = await readBilibili(reference, { ...options, maxVideoSeconds: !policy.durationGateEnabled ? undefined : policy.maxVideoSeconds, maxTextChars: policy.maxTextChars });
   const blocked = video.watchBlockReason || videoDurationReason(video, policy, options.watchApproved === true);
   if (blocked) return skippedVideo(blocked, policy, video.totalDuration ?? video.duration, video);
   const timeline = media.fullTimeline === true && options.startSeconds === undefined && options.endSeconds === undefined;
   const requestedFrames = options.frameCount ?? policy.defaultFrameCount;
-  const times = timeline ? planTimelineTimes(Number(video.duration))
+  let times = timeline ? planTimelineTimes(Number(video.duration))
     : planFrameTimes(Number(video.duration), { ...options, frameCount: lowMemory ? Math.min(6, requestedFrames) : requestedFrames });
   video.frames = [];
   video.visualStatus = 'unavailable';
@@ -221,6 +236,12 @@ async function readMedia(reference, options = {}) {
     if (!track) throw new Error('没有可读取的视频流');
     const file = path.join(dir, lowMemory ? 'video-480.m4s' : 'video.m4s');
     await downloadTrack(track, file, (lowMemory ? 32 : 128) * 1024 * 1024, video.url, lowMemory);
+    video.mediaDuration = await probeVideoDuration(file, media.ffmpegPath);
+    const duration = Math.min(Number(video.duration), video.mediaDuration);
+    times = timeline ? planTimelineTimes(duration)
+      : planFrameTimes(duration, { ...options, frameCount: lowMemory ? Math.min(6, requestedFrames) : requestedFrames });
+    video.coverage.startSeconds = times[0];
+    if (timeline) video.coverage.intervalSeconds = Math.max(2, Math.ceil(duration / 90));
     if(timeline){
       video.frames=await timelineSheets(file,dir,times,media.ffmpegPath);
     } else for (const seconds of times) {
@@ -239,9 +260,9 @@ async function readMedia(reference, options = {}) {
   video.coverage.endSeconds=video.coverage.frameTimestamps.at(-1)??null;
   video.coverage.wholeTimeline=timeline&&video.visualStatus==='available';
   video.audioTrackStatus=tracks ? (tracks.audio?.length ? 'present':'absent') : 'unknown';
-  if ((!lowMemory || media.speechSocketPath) && (timeline || !video.subtitle) && tracks?.audio?.length && media.transcribe !== false) {
+  if ((!lowMemory || media.speechSocketPath || media.ark) && (timeline || !video.subtitle) && tracks?.audio?.length && media.transcribe !== false) {
     try {
-      const transcriptFile = path.join(dir, media.speechSocketPath?'transcript-sensevoice-v1.json':'transcript.json');
+      const transcriptFile = path.join(dir, media.ark ? 'transcript-doubao-v1.json' : media.speechSocketPath?'transcript-sensevoice-v1.json':'transcript.json');
       let transcript;
       try { transcript = JSON.parse(await fs.readFile(transcriptFile, 'utf8')); } catch {
         const audioFile = path.join(dir, 'audio.m4s'), wav = path.join(dir, 'audio.wav');
@@ -261,7 +282,7 @@ async function readMedia(reference, options = {}) {
       video.audioSeconds = transcript.audioSeconds;
       video.transcriptStatus = text.replace(/[^\p{L}\p{N}]/gu,'').length>=2?'available':'no-clear-speech';
       if(video.transcriptStatus==='no-clear-speech')video.transcript='';
-      video.transcriptSource = 'local-sensevoice-asr';
+      video.transcriptSource = media.ark ? 'doubao-seed-asr-2.0' : 'local-sensevoice-asr';
       video.coverage.audio={seconds:transcript.audioSeconds,wholeTrack:Math.abs(transcript.audioSeconds-Number(video.duration))<=2,
         transcriptTruncated:video.transcriptTruncated,speechOnly:true};
     } catch (e) { video.transcriptError = String(e.message).slice(0, 500); }

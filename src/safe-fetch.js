@@ -409,6 +409,23 @@ export async function safeFetchBuffer(urlString, maxBytes = 8 * 1024 * 1024) {
 
 // Video/audio bytes use the same pinned-DNS and per-hop redirect checks as
 // images. Callers validate their media container before decoding local files.
+export async function safeFetchAudioBuffer(urlString, maxBytes = 8 * 1024 * 1024) {
+  validateLimit(maxBytes, 'maxBytes');
+  let { url, addresses } = await validateFetchUrl(urlString);
+  for (let i = 0; i <= 5; i++) {
+    if (url.protocol !== 'https:') throw new Error('音频下载只允许 HTTPS');
+    const result = await requestOnce(url, addresses, maxBytes, true);
+    if (REDIRECT_STATUSES.has(result.statusCode)) {
+      if (!result.redirect) throw new Error('音频重定向缺少 Location');
+      ({ url, addresses } = await validateFetchUrl(new URL(result.redirect, url).href));
+      continue;
+    }
+    if (result.statusCode !== 200) throw new Error(`音频下载失败：HTTP ${result.statusCode}`);
+    return { url: url.href, statusCode: result.statusCode, buffer: result.buffer };
+  }
+  throw new Error('音频重定向次数过多');
+}
+
 export async function safeFetchMedia(urlString, maxBytes, referer) {
   validateLimit(maxBytes, 'maxBytes');
   let { url, addresses } = await validateFetchUrl(urlString);
@@ -433,6 +450,14 @@ export async function safeFetchMedia(urlString, maxBytes, referer) {
 // Stream to a private temporary file using the same DNS pinning, redirect and
 // byte limits as the buffered path. Never give FFmpeg an unvalidated remote URL.
 export async function safeFetchMediaToFile(urlString, maxBytes, referer, destination) {
+  return safeFetchToFile(urlString, maxBytes, referer, destination, false);
+}
+
+export async function safeFetchImageToFile(urlString, maxBytes, destination) {
+  return safeFetchToFile(urlString, maxBytes, undefined, destination, true);
+}
+
+async function safeFetchToFile(urlString, maxBytes, referer, destination, image) {
   validateLimit(maxBytes, 'maxBytes');
   const temporary = `${destination}.${randomUUID()}.part`;
   try {
@@ -440,7 +465,7 @@ export async function safeFetchMediaToFile(urlString, maxBytes, referer, destina
     for (let i = 0; i <= 5; i++) {
       const result = await requestOnce(url, addresses, maxBytes, true, {
         timeoutMs: 90000, attemptTimeoutMs: 30000, outputFile: temporary,
-        headers: { referer, accept: '*/*' }
+        headers: { ...(referer ? { referer } : {}), accept: '*/*' }
       });
       if (REDIRECT_STATUSES.has(result.statusCode)) {
         if (!result.redirect) throw new Error('媒体重定向缺少 Location');
@@ -452,7 +477,10 @@ export async function safeFetchMediaToFile(urlString, maxBytes, referer, destina
       try {
         const header = Buffer.alloc(12);
         const { bytesRead } = await handle.read(header, 0, 12, 0);
-        if (bytesRead < 12 || !['ftyp', 'styp'].includes(header.toString('ascii', 4, 8))) throw new Error('不是有效的 MP4/DASH 媒体');
+        if (image ? !looksLikeImageBuffer(header.subarray(0, bytesRead))
+          : bytesRead < 12 || !['ftyp', 'styp'].includes(header.toString('ascii', 4, 8))) {
+          throw new Error(image ? '不是有效的图片（PNG/JPEG/GIF/WebP）' : '不是有效的 MP4/DASH 媒体');
+        }
       } finally { await handle.close(); }
       await fs.rename(temporary, destination);
       return { bytes: result.bytes };

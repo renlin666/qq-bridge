@@ -103,7 +103,7 @@ export async function readBilibili(reference, { page = 1, fetcher = safeFetch, m
   };
   if (maxVideoSeconds !== undefined) {
     const duration = Number(result.duration), total = Number(result.totalDuration);
-    if (![duration, total].every(n => Number.isFinite(n) && n > 0) || Math.max(duration, total) > maxVideoSeconds) {
+    if (![duration, total].every(n => Number.isFinite(n) && n > 0) || Math.max(duration, total) >= maxVideoSeconds) {
       result.watchBlockReason = ![duration, total].every(n => Number.isFinite(n) && n > 0) ? 'duration_unknown' : 'duration_exceeded';
       return result; // 只查元数据；在字幕、音视频下载前停止。
     }
